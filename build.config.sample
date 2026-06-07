@@ -1,0 +1,12 @@
+# build.config
+
+# Infrastructure Secrets
+XCPNG_IP="192.168.0.1"
+XCPNG_PASSWORD="MYSTRONGXCPPASSWORD"
+VM_NETWORK_NAME="LAN"
+
+# VM Template Security
+DEBIAN_ROOT_PASSWORD="MYSTRONGDebianPassw0rd"
+
+# Optional: Override VM configuration names
+VM_NAME="xoa-hl"
