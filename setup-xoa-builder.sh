@@ -192,6 +192,7 @@ cat << EOF > xoa-build.json
         "apt-get install -y curl wget sudo vim git jq cloud-init",
         "echo '==> Fetching stable Xen Guest Utilities...'",
         "DOWNLOAD_URL=$(curl -s https://api.github.com/repos/xenserver/xe-guest-utilities/releases/latest | jq -r '.assets[] | select(.name | endswith(\"amd64.deb\")) | .browser_download_url')",
+	"echo 'The download URL is: $DOWNLOAD_URL'",
         "wget -q $DOWNLOAD_URL -O /tmp/xe-guest-utilities.deb",
         "dpkg -i /tmp/xe-guest-utilities.deb || apt-get install -f -y",
         "rm -f /tmp/xe-guest-utilities.deb"
@@ -248,6 +249,7 @@ cat << EOF > xoa-build.json
   ]
 }
 EOF
+cd $BUILD_DIR
 
 echo -e "\n=========================================================="
 echo "  Setup Complete! Your environment is ready.              "
