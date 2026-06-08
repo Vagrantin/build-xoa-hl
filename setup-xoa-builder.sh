@@ -133,7 +133,7 @@ d-i partman-partitioning/confirm_write_new_label boolean true
 d-i partman/choose_partition select finish
 d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
-d-i tasksel/first multiselect standard
+tasksel tasksel/first multiselect standard
 d-i pkgsel/include string openssh-server sudo
 d-i grub-installer/only_debian boolean true
 d-i grub-installer/with_other_os boolean true
@@ -186,14 +186,12 @@ cat << EOF > xoa-build.json
     {
       "type": "shell",
       "inline": [
-        "echo '==> Updating base system...'",
+	"echo '==> Updating base system...'",
         "apt-get update && apt-get upgrade -y",
         "echo '==> Installing dependencies...'",
         "apt-get install -y curl wget sudo vim git jq cloud-init",
         "echo '==> Fetching stable Xen Guest Utilities...'",
-        "DOWNLOAD_URL=$(curl -s https://api.github.com/repos/xenserver/xe-guest-utilities/releases/latest | jq -r '.assets[] | select(.name | endswith(\"amd64.deb\")) | .browser_download_url')",
-	"echo 'The download URL is: $DOWNLOAD_URL'",
-        "wget -q $DOWNLOAD_URL -O /tmp/xe-guest-utilities.deb",
+        "wget -q \"https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities_10.0.0-1_amd64.deb\" -O /tmp/xe-guest-utilities.deb",
         "dpkg -i /tmp/xe-guest-utilities.deb || apt-get install -f -y",
         "rm -f /tmp/xe-guest-utilities.deb"
       ]
@@ -204,13 +202,22 @@ cat << EOF > xoa-build.json
         "echo '==> Cloning XOA installer...'",
         "git clone https://github.com/ronivay/XenOrchestraInstallerUpdater.git /tmp/xoa-installer",
         "cd /tmp/xoa-installer && git checkout master",
-        "chown -R xo:xo /tmp/xoa-installer"
+        "chown -R xo:xo /tmp/xoa-installer",
+        "ls -l /tmp/xoa-installer/"
       ]
     },
     {
       "type": "file",
       "source": "patches/",
       "destination": "/tmp/xoa-installer/"
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Patching XenOrchestra to become the home labber version'",
+        "su - xo -c 'cd /tmp/xoa-installer/ && pwd && ls -l && git apply /tmp/xoa-installer/menu-hide-items.patch'",
+        "echo '==> patching successfully applied.'"
+      ]
     },
     {
       "type": "shell",
@@ -249,7 +256,6 @@ cat << EOF > xoa-build.json
   ]
 }
 EOF
-cd $BUILD_DIR
 
 echo -e "\n=========================================================="
 echo "  Setup Complete! Your environment is ready.              "
@@ -258,3 +264,9 @@ echo "Next steps:"
 echo "1. cd $BUILD_DIR"
 echo "2. packer validate xoa-build.json"
 echo "3. packer build xoa-build.json"
+
+cd "$BUILD_DIR"
+pwd
+packer validate xoa-build.json
+PACKER_LOG=1 packer build xoa-build.json
+
