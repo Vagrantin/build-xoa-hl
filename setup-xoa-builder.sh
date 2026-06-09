@@ -29,7 +29,6 @@ DEBIAN_XO_USER="${DEBIAN_XO_USER:-xo}"
 DEBIAN_XO_PASSWORD="${DEBIAN_XO_PASSWORD:-YOUR_SECURE_XO_PASSWORD}"
 DEBIAN_ROOT_PASSWORD="${DEBIAN_ROOT_PASSWORD:-YOUR_SECURE_VM_PASSWORD}"
 DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://cdimage.debian.org/mirror/cdimage/archive/12.5.0/amd64/iso-cd/debian-12.5.0-amd64-netinst.iso}"
-# DEBIAN_ISO_CHECKSUM is intentionally left blank here if not provided via config, to be fetched dynamically later.
 
 # 3. Purge any broken legacy files from previous failed runs
 sudo rm -f /etc/apt/sources.list.d/hashicorp.list
@@ -76,7 +75,6 @@ if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
     ISO_FILENAME=$(basename "$DEBIAN_ISO_URL")
     ISO_BASE_URL=$(dirname "$DEBIAN_ISO_URL")
     
-    # Safely pull the mirror's SHA256SUMS file without breaking on pipeline failures
     SHA256_CONTENT=$(curl -sSL "${ISO_BASE_URL}/SHA256SUMS" || echo "")
     
     if [ -n "$SHA256_CONTENT" ]; then
@@ -87,7 +85,6 @@ if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
         fi
     fi
 
-    # Hard safety fallback in case the URL structure doesn't expose a standard SHA256SUMS file
     if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
         echo "WARNING: Dynamic lookup failed. Falling back to default 12.5.0 static checksum."
         DEBIAN_ISO_CHECKSUM="sha256:7398b688321cb170364d96a77d13ebbf0062b08fa1fb1fb98e21975b9f71c356"
@@ -134,7 +131,7 @@ d-i partman/choose_partition select finish
 d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 tasksel tasksel/first multiselect standard
-d-i pkgsel/include string openssh-server sudo
+d-i pkgsel/include string network-manager openssh-server sudo curl wget vim git jq
 d-i grub-installer/only_debian boolean true
 d-i grub-installer/with_other_os boolean true
 d-i grub-installer/bootdev  string default
@@ -158,7 +155,7 @@ cat << EOF > xoa-build.json
       "vm_name": "${VM_NAME}",
       "vm_description": "XOA Community Edition - xo-lite compatible",
       "disk_size": 10000,
-      "vm_memory": 2048,
+      "vm_memory": 4096,
       "http_directory": ".",
       "network_names": ["${VM_NETWORK_NAME}"],
       "boot_command": [
@@ -179,17 +176,16 @@ cat << EOF > xoa-build.json
       "ssh_timeout": "30m",
       "format": "xva",
       "output_directory": "output-xva",
-      "keep_vm": "never"
+      "keep_vm": "never",
+      "skip_set_template": "true"
     }
   ],
   "provisioners": [
     {
       "type": "shell",
       "inline": [
-	"echo '==> Updating base system...'",
+        "echo '==> Updating base system...'",
         "apt-get update && apt-get upgrade -y",
-        "echo '==> Installing dependencies...'",
-        "apt-get install -y curl wget sudo vim git jq cloud-init",
         "echo '==> Fetching stable Xen Guest Utilities...'",
         "wget -q \"https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities_10.0.0-1_amd64.deb\" -O /tmp/xe-guest-utilities.deb",
         "dpkg -i /tmp/xe-guest-utilities.deb || apt-get install -f -y",
@@ -202,7 +198,6 @@ cat << EOF > xoa-build.json
         "echo '==> Cloning XOA installer...'",
         "git clone https://github.com/ronivay/XenOrchestraInstallerUpdater.git /tmp/xoa-installer",
         "cd /tmp/xoa-installer && git checkout master",
-        "chown -R xo:xo /tmp/xoa-installer",
         "ls -l /tmp/xoa-installer/"
       ]
     },
@@ -214,28 +209,39 @@ cat << EOF > xoa-build.json
     {
       "type": "shell",
       "inline": [
-        "echo '==> Patching XenOrchestra to become the home labber version'",
-        "su - xo -c 'cd /tmp/xoa-installer/ && pwd && ls -l && git apply /tmp/xoa-installer/menu-hide-items.patch'",
-        "echo '==> patching successfully applied.'"
+        "echo '==> checking the content of the xoa-installer folder'",
+        "cd /tmp/xoa-installer/ && pwd && ls -l"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Implementing Local Git Repository for Xen-Orchestra source...'",
+        "git clone https://github.com/vatesfr/xen-orchestra.git /tmp/xen-orchestra-patched",
+        "cd /tmp/xen-orchestra-patched && git config user.name \"Packer Builder\" && git config user.email \"packer@internal\"",
+        "echo '==> Applying custom design patch down into the local source tree...'",
+        "cd /tmp/xen-orchestra-patched && git apply /tmp/xoa-installer/menu-hide-items.patch",
+        "cd /tmp/xen-orchestra-patched && git add -A && git commit -m \"Apply custom design patch\"",
+        "echo '==> Dynamically writing local source tree overrides into xo-install.cfg...'",
+        "echo 'REPOSITORY=\"/tmp/xen-orchestra-patched\"' > /tmp/xoa-installer/xo-install.cfg",
+        "echo 'BRANCH=\"master\"' >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'PATH_DIR=\"/opt/xo\"' >> /tmp/xoa-installer/xo-install.cfg"
       ]
     },
     {
       "type": "shell",
       "inline": [
         "echo '==> Running XOA installation (this will take a while)...'",
-        "su - xo -c 'cd /tmp/xoa-installer && ./xo-install.sh --oss --non-interactive'",
+        "cd /tmp/xoa-installer && ./xo-install.sh --install",
         "echo '==> Cleaning up install files...'",
         "apt-get clean",
-        "rm -rf /tmp/xoa-installer"
+        "rm -rf /tmp/xoa-installer",
+        "rm -rf /tmp/xen-orchestra-patched"
       ]
     },
     {
       "type": "shell",
       "inline": [
-        "echo '==> Optimizing cloud-init for XCP-ng/xo-lite...'",
-        "mkdir -p /etc/cloud/cloud.cfg.d",
-        "echo 'datasource_list: [ XenServer, NoCloud, ConfigDrive ]' > /etc/cloud/cloud.cfg.d/90_xcp_datasources.cfg",
-
         "echo '==> Cleaning network persistent state...'",
         "echo '# Interfaced managed by cloud-init' > /etc/network/interfaces",
         "echo 'auto lo' >> /etc/network/interfaces",
@@ -245,12 +251,6 @@ cat << EOF > xoa-build.json
         "echo -n > /etc/machine-id",
         "rm -f /var/lib/dbus/machine-id",
         "ln -s /etc/machine-id /var/lib/dbus/machine-id",
-
-        "echo '==> Removing existing SSH host keys...'",
-        "rm -f /etc/ssh/ssh_host_*_key*",
-
-        "echo '==> Clearing cloud-init cache cache...'",
-        "cloud-init clean --logs --seed"
       ]
     }
   ]
@@ -269,4 +269,6 @@ cd "$BUILD_DIR"
 pwd
 packer validate xoa-build.json
 PACKER_LOG=1 packer build xoa-build.json
-
+cd /root/xoa-build/output-xoa/
+gzip xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
+chown matth:matth /home/matth/xoa-hl.xva.gz
