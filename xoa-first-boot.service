@@ -1,0 +1,16 @@
+[Unit]
+Description=XOA First Boot - Network & SSH provisioning from XenStore
+# Must run before the network comes up so we write interfaces first
+DefaultDependencies=no
+After=local-fs.target sysinit.target
+Before=network.target networking.service
+ConditionPathExists=!/var/lib/xoa-first-boot.done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xoa-first-boot.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+
+[Install]
+WantedBy=sysinit.target

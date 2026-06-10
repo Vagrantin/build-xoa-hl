@@ -103,6 +103,7 @@ echo "Generating preseed.cfg..."
 cat << EOF > preseed.cfg
 # preseed.cfg
 d-i debian-installer/locale string en_US
+d-i debian-installer/add-kernel-opts string net.ifnames=0 biosdevname=0
 d-i keyboard-configuration/xkb-keymap select us
 d-i netcfg/choose_interface select auto
 d-i netcfg/get_hostname string xoa-base
@@ -203,15 +204,43 @@ cat << EOF > xoa-build.json
     },
     {
       "type": "file",
-      "source": "patches/",
+      "source": "patches/menu-hide-items.patch",
       "destination": "/tmp/xoa-installer/"
+    },
+    {
+      "type": "file",
+      "source": "scripts/xoa-first-boot.sh",
+      "destination": "/opt/xoa-first-boot.sh"
+    },
+    {
+      "type": "file",
+      "source": "scripts/xoa-credentials.sh",
+      "destination": "/opt/xoa-credentials.sh"
+    },
+    {
+      "type": "file",
+      "source": "systemd/xoa-first-boot.service",
+      "destination": "/etc/systemd/system/xoa-first-boot.service"
+    },
+    {
+      "type": "file",
+      "source": "systemd/xoa-credentials.service",
+      "destination": "/etc/systemd/system/xoa-credentials.service"
     },
     {
       "type": "shell",
       "inline": [
-        "echo '==> checking the content of the xoa-installer folder'",
-        "cd /tmp/xoa-installer/ && pwd && ls -l"
+        "chmod +x /opt/xoa-first-boot.sh /opt/xoa-credentials.sh",
+        "systemctl daemon-reload",
+        "systemctl enable xoa-first-boot.service xoa-credentials.service"
       ]
+    },
+    {
+        "type": "shell",
+        "inline": [
+          "echo '==> checking the content of the xoa-installer folder'",
+          "cd /tmp/xoa-installer/ && pwd && ls -l"
+        ]
     },
     {
       "type": "shell",
@@ -242,15 +271,10 @@ cat << EOF > xoa-build.json
     {
       "type": "shell",
       "inline": [
-        "echo '==> Cleaning network persistent state...'",
-        "echo '# Interfaced managed by cloud-init' > /etc/network/interfaces",
-        "echo 'auto lo' >> /etc/network/interfaces",
-        "echo 'iface lo inet loopback' >> /etc/network/interfaces",
-
         "echo '==> Stripping unique system identity...'",
         "echo -n > /etc/machine-id",
         "rm -f /var/lib/dbus/machine-id",
-        "ln -s /etc/machine-id /var/lib/dbus/machine-id",
+        "ln -s /etc/machine-id /var/lib/dbus/machine-id"
       ]
     }
   ]
@@ -269,6 +293,6 @@ cd "$BUILD_DIR"
 pwd
 packer validate xoa-build.json
 PACKER_LOG=1 packer build xoa-build.json
-cd /root/xoa-build/output-xoa/
+cd /root/xoa-build/output-xva/
 gzip xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
 chown matth:matth /home/matth/xoa-hl.xva.gz
