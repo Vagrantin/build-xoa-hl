@@ -28,7 +28,8 @@ VM_NAME="${VM_NAME:-xoa-community-edition}"
 DEBIAN_XO_USER="${DEBIAN_XO_USER:-xo}"
 DEBIAN_XO_PASSWORD="${DEBIAN_XO_PASSWORD:-YOUR_SECURE_XO_PASSWORD}"
 DEBIAN_ROOT_PASSWORD="${DEBIAN_ROOT_PASSWORD:-YOUR_SECURE_VM_PASSWORD}"
-DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://cdimage.debian.org/mirror/cdimage/archive/12.5.0/amd64/iso-cd/debian-12.5.0-amd64-netinst.iso}"
+#DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://ftp.jaist.ac.jp/pub/Linux/debian-cd/current/amd64/iso-cd/debian-12.12.0-amd64-netinst.iso}"
+DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://ftp.jaist.ac.jp/pub/Linux/debian-cd/current/amd64/iso-cd/debian-13.5.0-amd64-netinst.iso}"
 
 # 3. Purge any broken legacy files from previous failed runs
 sudo rm -f /etc/apt/sources.list.d/hashicorp.list
@@ -76,7 +77,6 @@ if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
     ISO_BASE_URL=$(dirname "$DEBIAN_ISO_URL")
     
     SHA256_CONTENT=$(curl -sSL "${ISO_BASE_URL}/SHA256SUMS" || echo "")
-    
     if [ -n "$SHA256_CONTENT" ]; then
         RAW_HASH=$(echo "$SHA256_CONTENT" | grep "$ISO_FILENAME" | head -n 1 | awk '{print $1}')
         if [ -n "$RAW_HASH" ]; then
@@ -92,7 +92,6 @@ if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
 else
     echo -e "\n---> Using user-defined configuration checksum: $DEBIAN_ISO_CHECKSUM"
 fi
-
 # 9. Scaffold the Project Structure
 echo -e "\n---> Creating Project Directory & Files..."
 mkdir -p "$BUILD_DIR/patches"
@@ -109,9 +108,8 @@ d-i netcfg/choose_interface select auto
 d-i netcfg/get_hostname string xoa-base
 d-i netcfg/get_domain string local
 d-i mirror/country string manual
-d-i mirror/http/hostname string deb.debian.org
-d-i mirror/http/directory string /debian
-d-i mirror/http/proxy string
+d-i mirror/http/hostname string ftp.jaist.ac.jp
+d-i mirror/http/directory string /pub/Linux/debian
 d-i passwd/root-login boolean true
 d-i passwd/root-password password ${DEBIAN_ROOT_PASSWORD}
 d-i passwd/root-password-again password ${DEBIAN_ROOT_PASSWORD}
@@ -120,7 +118,7 @@ d-i passwd/username string ${DEBIAN_XO_USER}
 d-i passwd/user-password password ${DEBIAN_XO_PASSWORD}
 d-i passwd/user-password-again password ${DEBIAN_XO_PASSWORD}
 d-i clock-setup/utc boolean true
-d-i time/zone string UTC
+d-i time/zone string Asia/Tokyo
 d-i partman-auto/method string lvm
 d-i partman-lvm/device_remove_lvm boolean true
 d-i partman-md/device_remove_md boolean true
@@ -177,7 +175,7 @@ cat << EOF > xoa-build.json
       "ssh_timeout": "30m",
       "format": "xva",
       "output_directory": "output-xva",
-      "keep_vm": "never",
+      "keep_vm": "always",
       "skip_set_template": "true"
     }
   ],
@@ -248,13 +246,61 @@ cat << EOF > xoa-build.json
         "echo '==> Implementing Local Git Repository for Xen-Orchestra source...'",
         "git clone https://github.com/vatesfr/xen-orchestra.git /tmp/xen-orchestra-patched",
         "cd /tmp/xen-orchestra-patched && git config user.name \"Packer Builder\" && git config user.email \"packer@internal\"",
-        "echo '==> Applying custom design patch down into the local source tree...'",
+        "echo '==> Applying custom design patch...'",
         "cd /tmp/xen-orchestra-patched && git apply /tmp/xoa-installer/menu-hide-items.patch",
         "cd /tmp/xen-orchestra-patched && git add -A && git commit -m \"Apply custom design patch\"",
-        "echo '==> Dynamically writing local source tree overrides into xo-install.cfg...'",
+    	"echo '==> Generating self-signed TLS certificate...'",
+    	"mkdir -p /opt/xo",
+    	"openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xo.key -out /opt/xo/xo.crt -days 3650 -nodes -subj \"/CN=xoa.local\"",
+        "echo '==> Writing xo-install.cfg...'",
         "echo 'REPOSITORY=\"/tmp/xen-orchestra-patched\"' > /tmp/xoa-installer/xo-install.cfg",
-        "echo 'BRANCH=\"master\"' >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PATH_DIR=\"/opt/xo\"' >> /tmp/xoa-installer/xo-install.cfg"
+        "echo 'BRANCH=\"master\"'                        >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'SELFUPGRADE=\"false\"'                    >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'PORT=\"443\"'                             >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'AUTOCERT=\"true\"'                        >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'PATH_TO_HTTPS_CERT=\"/opt/xo/xohl.crt\"'  >> /tmp/xoa-installer/xo-install.cfg",
+        "echo 'PATH_TO_HTTPS_KEY=\"/opt/xo/xohl.key\"'   >> /tmp/xoa-installer/xo-install.cfg"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Enabling Debian contrib repository for nbdkit-plugin-vddk...'",
+        "echo \"deb http://deb.debian.org/debian trixie contrib\" > /etc/apt/sources.list.d/contrib.list",
+        "echo \"deb http://deb.debian.org/debian trixie-updates contrib\" >> /etc/apt/sources.list.d/contrib.list",
+        "echo '==> Verifying contrib repo was added...'",
+        "cat /etc/apt/sources.list.d/contrib.list",
+        "apt-get update"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Installing nbdkit VDDK plugin and nbdinfo...'",
+        "apt-get install -y nbdkit nbdkit-plugin-vddk libnbd-bin"
+      ]
+    },
+    {
+      "type": "file",
+      "source": "vendor/VMware-vix-disklib-9.1.0.0.25379531.x86_64.tar.gz",
+      "destination": "/tmp/vddk.tar.gz"
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Extracting VDDK libraries...'",
+        "mkdir -p /opt/vmware-vix-disklib-distrib",
+        "tar -xzf /tmp/vddk.tar.gz -C /opt/vmware-vix-disklib-distrib --strip-components=1",
+        "rm -f /tmp/vddk.tar.gz",
+    
+        "echo '==> Registering VDDK shared libraries with ldconfig...'",
+        "echo '/opt/vmware-vix-disklib-distrib/lib64' > /etc/ld.so.conf.d/vddk.conf",
+        "ldconfig",
+    
+        "echo '==> Verifying nbdkit can load the VDDK plugin...'",
+        "nbdkit --version",
+        "nbdinfo --version",
+        "nbdkit vddk --dump-plugin 2>&1 | head -20"
       ]
     },
     {
@@ -294,5 +340,8 @@ pwd
 packer validate xoa-build.json
 PACKER_LOG=1 packer build xoa-build.json
 cd /root/xoa-build/output-xva/
+echo -e "\n=========================================================="
+echo "  Moving and compressing the XOA image.                   "
+echo "=========================================================="
 gzip xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
 chown matth:matth /home/matth/xoa-hl.xva.gz
