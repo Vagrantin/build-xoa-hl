@@ -192,6 +192,77 @@ ENVEOF
 chmod 600 /etc/xoa-first-boot.env
 
 echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
+
+# --- 7. Write NetworkManager keyfile ---
+echo ""
+echo "[$(date '+%H:%M:%S')] [7/7] Writing NetworkManager keyfile..."
+
+NM_CONN_DIR="/etc/NetworkManager/system-connections"
+NM_CONN_FILE="${NM_CONN_DIR}/xoa-provisioned.nmconnection"
+mkdir -p "$NM_CONN_DIR"
+
+CONN_UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+echo "[$(date '+%H:%M:%S')] Connection UUID : $CONN_UUID"
+
+if [ -z "$IP" ]; then
+    echo "[$(date '+%H:%M:%S')] No IP set → writing DHCP keyfile"
+    cat > "$NM_CONN_FILE" << NMEOF
+[connection]
+id=xoa-provisioned
+uuid=${CONN_UUID}
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=default
+NMEOF
+
+else
+    # Convert dotted netmask to CIDR prefix length
+    CIDR=$(python3 -c "
+import ipaddress
+print(ipaddress.IPv4Network('0.0.0.0/${NETMASK}', strict=False).prefixlen)
+" 2>/dev/null || echo "24")
+
+    # NM dns format: semicolon-separated with trailing semicolon
+    DNS_NM="${DNS};"
+
+    echo "[$(date '+%H:%M:%S')] Static IP  : ${IP}/${CIDR}"
+    echo "[$(date '+%H:%M:%S')] Gateway    : ${GATEWAY}"
+    echo "[$(date '+%H:%M:%S')] DNS        : ${DNS_NM}"
+
+    cat > "$NM_CONN_FILE" << NMEOF
+[connection]
+id=xoa-provisioned
+uuid=${CONN_UUID}
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+
+[ipv4]
+method=manual
+address1=${IP}/${CIDR},${GATEWAY}
+dns=${DNS_NM}
+
+[ipv6]
+method=ignore
+NMEOF
+fi
+
+# NM refuses to load keyfiles that are not chmod 600
+chmod 600 "$NM_CONN_FILE"
+echo "[$(date '+%H:%M:%S')] NM keyfile written : $NM_CONN_FILE"
+echo "[$(date '+%H:%M:%S')] NM keyfile content :"
+cat "$NM_CONN_FILE"
 echo "============================================================"
 echo " xoa-read-xenstore  finished at $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"

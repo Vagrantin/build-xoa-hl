@@ -1,6 +1,6 @@
 #!/bin/bash
 # /opt/xoa-credentials.sh
-# Phase 2: Updates XO admin credentials using NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli once xo-server is reachable.
+# Phase 2: Updates XO admin credentials using xo-cli once xo-server is reachable.
 # Runs once after first boot, then disables itself.
 
 LOG="/var/log/xoa-first-boot.log"
@@ -15,10 +15,28 @@ cleanup() {
         echo "[$(date '+%H:%M:%S')] XOA will retain Ronivay default credentials (admin@admin.net / admin)."
         echo "[$(date '+%H:%M:%S')] Change them manually via the XO web UI."
     fi
-    echo "[$(date '+%H:%M:%S')] Writing done flag and disabling service..."
+
+    echo "[$(date '+%H:%M:%S')] Writing done flag..."
     touch "$DONE_FLAG"
+
+    echo "[$(date '+%H:%M:%S')] Disabling and removing services..."
+    systemctl disable xoa-first-boot.service 2>/dev/null || true
     systemctl disable xoa-credentials.service 2>/dev/null || true
-    echo "[$(date '+%H:%M:%S')] xoa-credentials.service disabled. Will not run again."
+    rm -f /etc/systemd/system/xoa-first-boot.service
+    rm -f /etc/systemd/system/xoa-credentials.service
+    systemctl daemon-reload 2>/dev/null || true
+
+    echo "[$(date '+%H:%M:%S')] Removing env file with secrets..."
+    rm -f /etc/xoa-first-boot.env
+    rm -f /opt/xoa-first-boot.sh
+    rm -f /opt/xoa-credentials.sh
+
+    # Log removal must be last — nothing can be written after this
+    echo "[$(date '+%H:%M:%S')] First-boot complete. Removing log."
+    # Small delay to flush the echo above before the fd is unlinked
+    sync
+    rm -f "$LOG"
+    # No echo here — fd is gone
 }
 trap cleanup EXIT
 
@@ -68,9 +86,32 @@ done
 echo "[$(date)] xo-server is up."
 sleep 3  # let it fully initialise
 
-# Register NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli with bootstrap credentials
-NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli register "$XO_URL" "$BOOTSTRAP_EMAIL" "$BOOTSTRAP_PASSWORD" \
-    --accept-unauthorized >> "$LOG" 2>&1 || {
+# --- 7. Set SSH password ---
+echo ""
+echo "[$(date '+%H:%M:%S')] [7/8] Setting SSH system account password..."
+
+if [ -z "$SSH_PASSWORD" ]; then
+    echo "[$(date '+%H:%M:%S')] WARN: SSH_PASSWORD is empty — skipping password change."
+else
+    # Ronivay creates the 'xo' user by default
+    SSH_LOGIN="xo"
+
+    if ! id "$SSH_LOGIN" &>/dev/null; then
+        echo "[$(date '+%H:%M:%S')] WARN: User '$SSH_LOGIN' does not exist — skipping."
+    else
+        echo "${SSH_LOGIN}:${SSH_PASSWORD}" | chpasswd
+        CHPASSWD_EXIT=$?
+        if [ $CHPASSWD_EXIT -eq 0 ]; then
+            echo "[$(date '+%H:%M:%S')] SSH password set OK for user: $SSH_LOGIN"
+        else
+            echo "[$(date '+%H:%M:%S')] ERROR: chpasswd failed with exit code $CHPASSWD_EXIT"
+        fi
+    fi
+fi
+
+# Register xo-cli with bootstrap credentials
+xo-cli register --allowUnauthorized "$XO_URL" "$BOOTSTRAP_EMAIL" "$BOOTSTRAP_PASSWORD" \
+    >> "$LOG" 2>&1 || {
     echo "[$(date)] ERROR: xo-cli registration failed with bootstrap credentials."
     exit 1
 }
@@ -78,7 +119,7 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli register "$XO_URL" "$BOOTSTRAP_EMAIL" "$BO
 # Change the password
 if [ -n "$NEW_PASSWORD" ]; then
     echo "[$(date)] Updating admin password..."
-    NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli user.changePassword \
+    xo-cli user.changePassword \
         oldPassword="$BOOTSTRAP_PASSWORD" \
         newPassword="$NEW_PASSWORD" >> "$LOG" 2>&1 || \
     echo "[$(date)] WARN: Password change failed (may already be changed)"
@@ -86,21 +127,35 @@ fi
 
 # Change the email/login if different from default
 if [ -n "$NEW_LOGIN" ] && [ "$NEW_LOGIN" != "$BOOTSTRAP_EMAIL" ]; then
-    echo "[$(date)] Updating admin email to $NEW_LOGIN ..."
-    # Get the admin user UUID
-    USER_UUID=$(NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli user.getAll 2>/dev/null | \
-        python3 -c "import sys,json; users=json.load(sys.stdin); \
-        print([u['id'] for u in users.values() if u.get('email')=='${BOOTSTRAP_EMAIL}'][0])" \
-        2>/dev/null || echo "")
+    echo "[$(date '+%H:%M:%S')] Updating admin email to: $NEW_LOGIN"
 
-    if [ -n "$USER_UUID" ]; then
-        NODE_TLS_REJECT_UNAUTHORIZED=0 xo-cli user.set id="$USER_UUID" email="$NEW_LOGIN" >> "$LOG" 2>&1 || \
-        echo "[$(date)] WARN: Email change failed. Using password-only change."
+    echo "[$(date '+%H:%M:%S')] Fetching user list..."
+    RAW_USERS=$(xo-cli user.getAll 2>&1)
+    echo "[$(date '+%H:%M:%S')] user.getAll output:"
+
+    # xo-cli outputs JS object notation (not JSON) — parse with grep/sed
+    # Format is:  id: 'b6d07d80-c404-4ac8-96a6-38a2d74551f3',
+    USER_UUID=$(echo "$RAW_USERS" \
+        | grep -E "^\s+id:" \
+        | head -1 \
+        | sed "s/.*id: '//;s/'.*//")
+
+    echo "[$(date '+%H:%M:%S')] USER_UUID resolved: '${USER_UUID}'"
+
+    if [ -z "$USER_UUID" ]; then
+        echo "[$(date '+%H:%M:%S')] WARN: Could not resolve USER_UUID — email not changed."
+    else
+        echo "[$(date '+%H:%M:%S')] Calling user.set..."
+        xo-cli user.set \
+            id="$USER_UUID" \
+            email="$NEW_LOGIN" && \
+            echo "[$(date '+%H:%M:%S')] Email updated to: $NEW_LOGIN" || \
+            echo "[$(date '+%H:%M:%S')] WARN: user.set failed."
     fi
 fi
-
 # Cleanup secrets from tmpfs
 rm -f /run/xoa-provision/admin-login /run/xoa-provision/admin-password
 
 touch "$DONE_FLAG"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === xoa-credentials complete ==="
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Cleaning behind me ==="

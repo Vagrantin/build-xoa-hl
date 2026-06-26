@@ -119,11 +119,8 @@ d-i passwd/user-password password ${DEBIAN_XO_PASSWORD}
 d-i passwd/user-password-again password ${DEBIAN_XO_PASSWORD}
 d-i clock-setup/utc boolean true
 d-i time/zone string Asia/Tokyo
-d-i partman-auto/method string lvm
-d-i partman-lvm/device_remove_lvm boolean true
-d-i partman-md/device_remove_md boolean true
-d-i partman-lvm/confirm boolean true
-d-i partman-lvm/confirm_nooverwrite boolean true
+d-i partman-auto/method string regular
+d-i partman-auto/filesystem string ext4
 d-i partman-auto/choose_recipe select atomic
 d-i partman-partitioning/confirm_write_new_label boolean true
 d-i partman/choose_partition select finish
@@ -131,6 +128,7 @@ d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 tasksel tasksel/first multiselect standard
 d-i pkgsel/include string network-manager openssh-server sudo curl wget vim git jq
+d-i pkgsel/exclude string firmware-b43-installer firmware-ralink firmware-realtek firmware-*wifi* firmware-ath9k firmware-brcm80211 wireless-tools wpagui bluetooth bluez lvm2 dmsetup
 d-i grub-installer/only_debian boolean true
 d-i grub-installer/with_other_os boolean true
 d-i grub-installer/bootdev  string default
@@ -173,7 +171,7 @@ cat << EOF > xoa-build.json
       "ssh_username": "root",
       "ssh_password": "${DEBIAN_ROOT_PASSWORD}",
       "ssh_timeout": "30m",
-      "format": "xva",
+      "format": "xva_compressed",
       "output_directory": "output-xva",
       "keep_vm": "always",
       "skip_set_template": "true"
@@ -265,47 +263,6 @@ cat << EOF > xoa-build.json
     {
       "type": "shell",
       "inline": [
-        "echo '==> Enabling Debian contrib repository for nbdkit-plugin-vddk...'",
-        "echo \"deb http://deb.debian.org/debian trixie contrib\" > /etc/apt/sources.list.d/contrib.list",
-        "echo \"deb http://deb.debian.org/debian trixie-updates contrib\" >> /etc/apt/sources.list.d/contrib.list",
-        "echo '==> Verifying contrib repo was added...'",
-        "cat /etc/apt/sources.list.d/contrib.list",
-        "apt-get update"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "echo '==> Installing nbdkit VDDK plugin and nbdinfo...'",
-        "apt-get install -y nbdkit nbdkit-plugin-vddk libnbd-bin"
-      ]
-    },
-    {
-      "type": "file",
-      "source": "vendor/VMware-vix-disklib-9.1.0.0.25379531.x86_64.tar.gz",
-      "destination": "/tmp/vddk.tar.gz"
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "echo '==> Extracting VDDK libraries...'",
-        "mkdir -p /opt/vmware-vix-disklib-distrib",
-        "tar -xzf /tmp/vddk.tar.gz -C /opt/vmware-vix-disklib-distrib --strip-components=1",
-        "rm -f /tmp/vddk.tar.gz",
-    
-        "echo '==> Registering VDDK shared libraries with ldconfig...'",
-        "echo '/opt/vmware-vix-disklib-distrib/lib64' > /etc/ld.so.conf.d/vddk.conf",
-        "ldconfig",
-    
-        "echo '==> Verifying nbdkit can load the VDDK plugin...'",
-        "nbdkit --version",
-        "nbdinfo --version",
-        "nbdkit vddk --dump-plugin 2>&1 | head -20"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
         "echo '==> Running XOA installation (this will take a while)...'",
         "cd /tmp/xoa-installer && ./xo-install.sh --install",
         "echo '==> Cleaning up install files...'",
@@ -343,5 +300,5 @@ cd /root/xoa-build/output-xva/
 echo -e "\n=========================================================="
 echo "  Moving and compressing the XOA image.                   "
 echo "=========================================================="
-gzip xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
+gzip --best xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
 chown matth:matth /home/matth/xoa-hl.xva.gz
