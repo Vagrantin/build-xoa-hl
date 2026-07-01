@@ -1,12 +1,26 @@
-# build.config
+# build.config - AlmaLinux POC Configuration
+# This runs on Linux Mint build machine
 
 # Infrastructure Secrets
 XCPNG_IP="192.168.0.1"
+XCPNG_USER="root"
 XCPNG_PASSWORD="MYSTRONGXCPPASSWORD"
 VM_NETWORK_NAME="LAN"
 
-# VM Template Security
-DEBIAN_ROOT_PASSWORD="MYSTRONGDebianPassw0rd"
+# AlmaLinux Settings - Latest LTS (AlmaLinux 9)
+ALMALINUX_VERSION="9"
+ALMALINUX_ISO_URL="https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9-latest-x86_64-minimal.iso"
+# Get checksum from: https://repo.almalinux.org/almalinux/9/isos/x86_64/
+# Run: sha256sum AlmaLinux-9-latest-x86_64-minimal.iso
+ALMALINUX_ISO_CHECKSUM=""
 
-# Optional: Override VM configuration names
-VM_NAME="xoa-hl"
+# VM Root Password
+ALMALINUX_ROOT_PASSWORD="MYSTRONGAlmaLinuxPassw0rd"
+
+# VM Settings
+VM_NAME="xoa-almalinux"
+BUILD_DIR="$HOME/xoa-almalinux-build"
+
+# xe-guest-utilities URL (hosted by xenserver.com)
+# Installed via Packer provisioner, not in Kickstart
+XE_GUEST_UTILITIES_URL="https://releases.xenserver.com/packages/main/xe-guest-utilities/xe-guest-utilities-10.0.0-1.el9.x86_64.rpm"

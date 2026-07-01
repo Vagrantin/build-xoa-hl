@@ -1,41 +1,50 @@
 #!/bin/bash
-# Exit immediately if a command exits with a non-zero status
-set -e 
+# Setup script for AlmaLinux-based XOA builder
+# Similar to setup-xoa-builder.sh but for AlmaLinux
+# Runs on Linux Mint build machine
+# Generates ks.cfg and almalinux-build.json dynamically
 
-# Define the name of the external configuration file
+set -e
+
 CONFIG_FILE="build.config"
 
 echo "=========================================================="
-echo "  XOA-Lite Packer Build Environment Setup for Linux Mint  "
+echo "  XOA-Lite Packer Build Environment Setup for AlmaLinux  "
+echo "  Running on Linux Mint build machine                  "
 echo "=========================================================="
 
-# 1. Try to load the external config file
+# 1. Load external config
 if [ -f "$CONFIG_FILE" ]; then
     echo "---> Found external configuration: loading $CONFIG_FILE..."
-    # Source the file to import its variables
     source "./$CONFIG_FILE"
 else
     echo "---> No external '$CONFIG_FILE' found. Proceeding with fallback defaults."
 fi
 
-# 2. Establish fallback values using ${VARIABLE:-DEFAULT} syntax
-BUILD_DIR="${BUILD_DIR:-$HOME/xoa-build}"
+# 2. Establish fallback values
+BUILD_DIR="${BUILD_DIR:-$HOME/xoa-almalinux-build}"
 XCPNG_IP="${XCPNG_IP:-192.168.1.10}"
 XCPNG_USER="${XCPNG_USER:-root}"
 XCPNG_PASSWORD="${XCPNG_PASSWORD:-YOUR_XCPNG_PASSWORD}"
 VM_NETWORK_NAME="${VM_NETWORK_NAME:-Pool-wide network associated with eth0}"
-VM_NAME="${VM_NAME:-xoa-community-edition}"
-DEBIAN_XO_USER="${DEBIAN_XO_USER:-xo}"
-DEBIAN_XO_PASSWORD="${DEBIAN_XO_PASSWORD:-YOUR_SECURE_XO_PASSWORD}"
-DEBIAN_ROOT_PASSWORD="${DEBIAN_ROOT_PASSWORD:-YOUR_SECURE_VM_PASSWORD}"
-#DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://ftp.jaist.ac.jp/pub/Linux/debian-cd/current/amd64/iso-cd/debian-12.12.0-amd64-netinst.iso}"
-DEBIAN_ISO_URL="${DEBIAN_ISO_URL:-https://ftp.jaist.ac.jp/pub/Linux/debian-cd/current/amd64/iso-cd/debian-13.5.0-amd64-netinst.iso}"
+VM_NAME="${VM_NAME:-xoa-almalinux}"
+ALMALINUX_ROOT_PASSWORD="${ALMALINUX_ROOT_PASSWORD:-YOUR_SECURE_VM_PASSWORD}"
 
-# 3. Purge any broken legacy files from previous failed runs
-sudo rm -f /etc/apt/sources.list.d/hashicorp.list
+# AlmaLinux version - Latest LTS (AlmaLinux 9)
+ALMALINUX_VERSION="${ALMALINUX_VERSION:-9}"
+ALMALINUX_ISO_URL="${ALMALINUX_ISO_URL:-https://repo.almalinux.org/almalinux/${ALMALINUX_VERSION}/isos/x86_64/AlmaLinux-${ALMALINUX_VERSION}-latest-x86_64-minimal.iso}"
+ALMALINUX_ISO_CHECKSUM="${ALMALINUX_ISO_CHECKSUM:-}"
 
-# 4. Safely extract the upstream Ubuntu base codename (e.g., noble)
-echo "---> Detecting upstream OS codename..."
+echo "---> Using AlmaLinux version: $ALMALINUX_VERSION (Latest LTS)"
+echo "---> ISO URL: $ALMALINUX_ISO_URL"
+
+# 3. Install prerequisites
+echo -e "\n---> Installing prerequisites..."
+sudo apt-get update || true
+sudo apt-get install -y wget gpg coreutils curl ufw jq
+
+# 4. Install Packer
+echo -e "\n---> Installing HashiCorp Packer..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     REPO_CODENAME=${UBUNTU_CODENAME:-$VERSION_CODENAME}
@@ -47,132 +56,211 @@ if [ "$REPO_CODENAME" = "zara" ]; then
     REPO_CODENAME="noble"
 fi
 
-echo "Using upstream repository codename: $REPO_CODENAME"
-
-# 5. Add GPG Key and Repo BEFORE running apt-get update
-echo -e "\n---> Preparing Repositories..."
-sudo apt-get update || true 
-sudo apt-get install -y wget gpg coreutils curl ufw
-
 wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${REPO_CODENAME} main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 
-# 6. Now run the clean system update and install Packer
-echo -e "\n---> Installing HashiCorp Packer..."
 sudo apt-get update
 sudo apt-get install -y packer
 
-# 7. Install XCP-ng/XenServer Packer Plugin
+# 5. Install XCP-ng Packer Plugin
 echo -e "\n---> Installing XCP-ng Packer Plugin..."
 packer plugins install github.com/ddelnano/xenserver
 
-# 8. Configure Firewall for Packer HTTP Server
+# 6. Configure Firewall
 echo -e "\n---> Configuring UFW Firewall (Ports 8000-9000)..."
 sudo ufw allow 8000:9000/tcp
 
-# 8.5 Dynamically resolve ISO Checksum if not explicitly predefined
-if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
-    echo -e "\n---> Resolving ISO Checksum dynamically..."
-    ISO_FILENAME=$(basename "$DEBIAN_ISO_URL")
-    ISO_BASE_URL=$(dirname "$DEBIAN_ISO_URL")
+# 7. Resolve ISO Checksum
+echo -e "\n---> Resolving AlmaLinux ISO Checksum..."
+if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
+    echo "---> Attempting to fetch checksum from AlmaLinux mirrors..."
+    ISO_FILENAME=$(basename "$ALMALINUX_ISO_URL")
+    ISO_BASE_URL=$(dirname "$ALMALINUX_ISO_URL")
     
-    SHA256_CONTENT=$(curl -sSL "${ISO_BASE_URL}/SHA256SUMS" || echo "")
-    if [ -n "$SHA256_CONTENT" ]; then
-        RAW_HASH=$(echo "$SHA256_CONTENT" | grep "$ISO_FILENAME" | head -n 1 | awk '{print $1}')
+    # Try CHECKSUM file
+    CHECKSUM_CONTENT=$(curl -sSL "${ISO_BASE_URL}/CHECKSUM" 2>/dev/null || echo "")
+    if [ -n "$CHECKSUM_CONTENT" ]; then
+        RAW_HASH=$(echo "$CHECKSUM_CONTENT" | grep "$ISO_FILENAME" | head -n 1 | awk '{print $1}')
         if [ -n "$RAW_HASH" ]; then
-            DEBIAN_ISO_CHECKSUM="sha256:${RAW_HASH}"
-            echo "Successfully parsed remote checksum: $DEBIAN_ISO_CHECKSUM"
+            ALMALINUX_ISO_CHECKSUM="sha256:${RAW_HASH}"
+            echo "Successfully parsed checksum: $ALMALINUX_ISO_CHECKSUM"
         fi
     fi
-
-    if [ -z "$DEBIAN_ISO_CHECKSUM" ]; then
-        echo "WARNING: Dynamic lookup failed. Falling back to default 12.5.0 static checksum."
-        DEBIAN_ISO_CHECKSUM="sha256:7398b688321cb170364d96a77d13ebbf0062b08fa1fb1fb98e21975b9f71c356"
+    
+    # Try SHA256SUMS file
+    if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
+        CHECKSUM_CONTENT=$(curl -sSL "${ISO_BASE_URL}/SHA256SUMS" 2>/dev/null || echo "")
+        if [ -n "$CHECKSUM_CONTENT" ]; then
+            RAW_HASH=$(echo "$CHECKSUM_CONTENT" | grep "$ISO_FILENAME" | head -n 1 | awk '{print $1}')
+            if [ -n "$RAW_HASH" ]; then
+                ALMALINUX_ISO_CHECKSUM="sha256:${RAW_HASH}"
+                echo "Successfully parsed checksum from SHA256SUMS: $ALMALINUX_ISO_CHECKSUM"
+            fi
+        fi
     fi
-else
-    echo -e "\n---> Using user-defined configuration checksum: $DEBIAN_ISO_CHECKSUM"
+    
+    if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
+        echo "WARNING: Could not resolve checksum automatically."
+        echo "Please provide ALMALINUX_ISO_CHECKSUM in build.config"
+        echo "Get it from: https://repo.almalinux.org/almalinux/${ALMALINUX_VERSION}/isos/x86_64/"
+        exit 1
+    fi
 fi
-# 9. Scaffold the Project Structure
+
+# 8. Create build directory and generate files
 echo -e "\n---> Creating Project Directory & Files..."
 mkdir -p "$BUILD_DIR/patches"
+mkdir -p "$BUILD_DIR/scripts"
 cd "$BUILD_DIR"
 
-# Generate preseed.cfg
-echo "Generating preseed.cfg..."
-cat << EOF > preseed.cfg
-# preseed.cfg
-d-i debian-installer/locale string en_US
-d-i debian-installer/add-kernel-opts string net.ifnames=0 biosdevname=0
-d-i keyboard-configuration/xkb-keymap select us
-d-i netcfg/choose_interface select auto
-d-i netcfg/get_hostname string xoa-base
-d-i netcfg/get_domain string local
-d-i mirror/country string manual
-d-i mirror/http/hostname string ftp.jaist.ac.jp
-d-i mirror/http/directory string /pub/Linux/debian
-d-i passwd/root-login boolean true
-d-i passwd/root-password password ${DEBIAN_ROOT_PASSWORD}
-d-i passwd/root-password-again password ${DEBIAN_ROOT_PASSWORD}
-d-i passwd/user-fullname string XenOrchestra User
-d-i passwd/username string ${DEBIAN_XO_USER}
-d-i passwd/user-password password ${DEBIAN_XO_PASSWORD}
-d-i passwd/user-password-again password ${DEBIAN_XO_PASSWORD}
-d-i clock-setup/utc boolean true
-d-i time/zone string Asia/Tokyo
-d-i partman-auto/method string regular
-d-i partman-auto/filesystem string ext4
-d-i partman-auto/choose_recipe select atomic
-d-i partman-partitioning/confirm_write_new_label boolean true
-d-i partman/choose_partition select finish
-d-i partman/confirm boolean true
-d-i partman/confirm_nooverwrite boolean true
-tasksel tasksel/first multiselect standard
-d-i pkgsel/include string network-manager openssh-server sudo curl wget vim git jq
-d-i pkgsel/exclude string firmware-b43-installer firmware-ralink firmware-realtek firmware-*wifi* firmware-ath9k firmware-brcm80211 wireless-tools wpagui bluetooth bluez lvm2 dmsetup
-d-i grub-installer/only_debian boolean true
-d-i grub-installer/with_other_os boolean true
-d-i grub-installer/bootdev  string default
-d-i preseed/late_command string in-target sed -i 's/.*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
-d-i finish-install/reboot_in_progress note
-EOF
+# Generate ks.cfg with EXT partitioning (not LVM) and all packages
+cat > ks.cfg << 'KSEOF'
+# AlmaLinux 9 Minimal Kickstart Configuration
+# Target: Minimal install for XOA
+# POC: SELinux disabled, DHCP network, EXT filesystem
 
-# Generate xoa-build.json
-echo "Generating xoa-build.json..."
-cat << EOF > xoa-build.json
+# System language
+lang en_US.UTF-8
+
+# Keyboard layout
+keyboard us
+
+# Network configuration - DHCP only (as requested)
+network --onboot yes --device eth0 --bootproto dhcp
+
+# Root password (will be replaced by Packer)
+rootpw --plaintext placeholder_password
+
+# System timezone
+timezone Asia/Tokyo --isUtc
+
+# System authorization information
+auth --enableshadow --passalgo=sha512
+
+# SELinux configuration - DISABLED (as requested)
+selinux --disabled
+
+# Firewall configuration
+firewall --disabled
+
+# System bootloader configuration
+bootloader --location=mbr --boot-drive=sda
+
+# Clear the Master Boot Record
+zerombr
+
+# Partition clearing information
+clearpart --all --initlabel
+
+# Disk partitioning - EXT (not LVM, as requested)
+part /boot --fstype="ext4" --size=1024
+part / --fstype="ext4" --size=1 --grow
+
+# Reboot after installation
+reboot
+
+%packages
+@^minimal-environment
+@core
+kexec-tools
+chrony
+openssh-server
+openssh-clients
+wget
+curl
+jq
+tar
+gzip
+xfsprogs
+net-tools
+iproute
+vim-enhanced
+procps-ng
+lsof
+strace
+psmisc
+# Node.js 22.x dependencies
+yum-utils
+# For building from source (if needed)
+git
+make
+gcc
+gcc-c++
+# XOA runtime dependencies
+nfs-utils
+cifs-utils
+lvm2
+ntfs-3g
+fuse
+# Valkey (Redis replacement)
+valkey
+# Development tools for Node.js native modules
+python3
+python3-devel
+%end
+
+%post --log=/root/ks-post.log
+
+# Ensure SELinux is disabled
+sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+
+# Enable and start chrony
+systemctl enable chronyd --now
+
+# Enable and start SSH
+systemctl enable sshd --now
+
+# Configure SSH for root login (temporary for build)
+sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+systemctl restart sshd
+
+# Create xo user for XOA
+groupadd -f xo
+useradd -m -g xo -s /bin/bash xo
+echo "xo:placeholder_password" | chpasswd
+
+# Install Node.js 22.x from NodeSource
+curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+dnf install -y nodejs
+
+%end
+KSEOF
+
+# Copy shared scripts if they exist
+for script in xoa-first-boot.sh xoa-credentials.sh xoa-first-boot.service xoa-credentials.service; do
+    if [ -f ../$script ]; then
+        cp ../$script .
+    fi
+done
+
+# Generate almalinux-build.json
+cat > almalinux-build.json << PACKEREOF
 {
   "builders": [
     {
       "type": "xenserver-iso",
-      "remote_host": "${XCPNG_IP}",
-      "remote_username": "${XCPNG_USER}",
-      "remote_password": "${XCPNG_PASSWORD}",
-      "iso_url": "${DEBIAN_ISO_URL}",
-      "iso_checksum": "${DEBIAN_ISO_CHECKSUM}",
+      "remote_host": "$XCPNG_IP",
+      "remote_username": "$XCPNG_USER",
+      "remote_password": "$XCPNG_PASSWORD",
+      "iso_url": "$ALMALINUX_ISO_URL",
+      "iso_checksum": "$ALMALINUX_ISO_CHECKSUM",
       "sr_name": "Local storage",
-      "vm_name": "${VM_NAME}",
-      "vm_description": "XOA Community Edition - xo-lite compatible",
+      "vm_name": "$VM_NAME",
+      "vm_description": "XOA Community Edition - AlmaLinux $ALMALINUX_VERSION - xo-lite compatible",
       "disk_size": 10000,
       "vm_memory": 4096,
       "http_directory": ".",
-      "network_names": ["${VM_NETWORK_NAME}"],
+      "network_names": ["$VM_NETWORK_NAME"],
       "boot_command": [
-       "<wait5><esc><wait>",
-       "install <wait>",
-       " url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg <wait>",
-       " debian-installer=en_US.UTF-8 <wait>",
-       " auto=true <wait>",
-       " priority=critical <wait>",
-       " locale=en_US.UTF-8 <wait>",
-       " keyboard-configuration/xkb-keymap=us <wait>",
-       " interface=auto",
-       " vga=788 noprompt quiet--- <enter>"
+        "<wait5><esc><wait>",
+        "linux ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ks.cfg<enter>"
       ],
       "boot_wait": "5s",
       "ssh_username": "root",
-      "ssh_password": "${DEBIAN_ROOT_PASSWORD}",
+      "ssh_password": "$ALMALINUX_ROOT_PASSWORD",
       "ssh_timeout": "30m",
       "format": "xva_compressed",
-      "output_directory": "output-xva",
       "keep_vm": "always",
       "skip_set_template": "true"
     }
@@ -182,11 +270,16 @@ cat << EOF > xoa-build.json
       "type": "shell",
       "inline": [
         "echo '==> Updating base system...'",
-        "apt-get update && apt-get upgrade -y",
-        "echo '==> Fetching stable Xen Guest Utilities...'",
-        "wget -q \"https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities_10.0.0-1_amd64.deb\" -O /tmp/xe-guest-utilities.deb",
-        "dpkg -i /tmp/xe-guest-utilities.deb || apt-get install -f -y",
-        "rm -f /tmp/xe-guest-utilities.deb"
+        "dnf update -y"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Installing xe-guest-utilities from xenserver.com...'",
+        "wget -q https://releases.xenserver.com/packages/main/xe-guest-utilities/xe-guest-utilities-10.0.0-1.el9.x86_64.rpm -O /tmp/xe-guest-utilities.rpm",
+        "dnf install -y /tmp/xe-guest-utilities.rpm",
+        "rm -f /tmp/xe-guest-utilities.rpm"
       ]
     },
     {
@@ -194,8 +287,7 @@ cat << EOF > xoa-build.json
       "inline": [
         "echo '==> Cloning XOA installer...'",
         "git clone https://github.com/ronivay/XenOrchestraInstallerUpdater.git /tmp/xoa-installer",
-        "cd /tmp/xoa-installer && git checkout master",
-        "ls -l /tmp/xoa-installer/"
+        "cd /tmp/xoa-installer && git checkout master"
       ]
     },
     {
@@ -204,23 +296,64 @@ cat << EOF > xoa-build.json
       "destination": "/tmp/xoa-installer/"
     },
     {
+      "type": "shell",
+      "inline": [
+        "echo '==> Cloning xen-orchestra source...'",
+        "git clone https://github.com/vatesfr/xen-orchestra.git /tmp/xen-orchestra-patched",
+        "cd /tmp/xen-orchestra-patched && git config user.name 'Packer Builder' && git config user.email 'packer@internal'",
+        "echo '==> Applying custom design patch...'",
+        "cd /tmp/xen-orchestra-patched && git apply /tmp/xoa-installer/menu-hide-items.patch",
+        "cd /tmp/xen-orchestra-patched && git add -A && git commit -m 'Apply custom design patch'"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Generating self-signed TLS certificate...'",
+        "mkdir -p /opt/xo",
+        "openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xo.key -out /opt/xo/xo.crt -days 3650 -nodes -subj '/CN=xoa.local'"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Writing xo-install.cfg...'",
+        "cat > /tmp/xoa-installer/xo-install.cfg << 'XOEOF'
+REPOSITORY="/tmp/xen-orchestra-patched"
+BRANCH="master"
+SELFUPGRADE="false"
+PORT="443"
+AUTOCERT="true"
+PATH_TO_HTTPS_CERT="/opt/xo/xo.crt"
+PATH_TO_HTTPS_KEY="/opt/xo/xo.key"
+XOEOF"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Running XOA installation...'",
+        "cd /tmp/xoa-installer && ./xo-install.sh --install"
+      ]
+    },
+    {
       "type": "file",
-      "source": "scripts/xoa-first-boot.sh",
+      "source": "xoa-first-boot.sh",
       "destination": "/opt/xoa-first-boot.sh"
     },
     {
       "type": "file",
-      "source": "scripts/xoa-credentials.sh",
+      "source": "xoa-credentials.sh",
       "destination": "/opt/xoa-credentials.sh"
     },
     {
       "type": "file",
-      "source": "systemd/xoa-first-boot.service",
+      "source": "xoa-first-boot.service",
       "destination": "/etc/systemd/system/xoa-first-boot.service"
     },
     {
       "type": "file",
-      "source": "systemd/xoa-credentials.service",
+      "source": "xoa-credentials.service",
       "destination": "/etc/systemd/system/xoa-credentials.service"
     },
     {
@@ -232,41 +365,10 @@ cat << EOF > xoa-build.json
       ]
     },
     {
-        "type": "shell",
-        "inline": [
-          "echo '==> checking the content of the xoa-installer folder'",
-          "cd /tmp/xoa-installer/ && pwd && ls -l"
-        ]
-    },
-    {
       "type": "shell",
       "inline": [
-        "echo '==> Implementing Local Git Repository for Xen-Orchestra source...'",
-        "git clone https://github.com/vatesfr/xen-orchestra.git /tmp/xen-orchestra-patched",
-        "cd /tmp/xen-orchestra-patched && git config user.name \"Packer Builder\" && git config user.email \"packer@internal\"",
-        "echo '==> Applying custom design patch...'",
-        "cd /tmp/xen-orchestra-patched && git apply /tmp/xoa-installer/menu-hide-items.patch",
-        "cd /tmp/xen-orchestra-patched && git add -A && git commit -m \"Apply custom design patch\"",
-    	"echo '==> Generating self-signed TLS certificate...'",
-    	"mkdir -p /opt/xo",
-    	"openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xo.key -out /opt/xo/xo.crt -days 3650 -nodes -subj \"/CN=xoa.local\"",
-        "echo '==> Writing xo-install.cfg...'",
-        "echo 'REPOSITORY=\"/tmp/xen-orchestra-patched\"' > /tmp/xoa-installer/xo-install.cfg",
-        "echo 'BRANCH=\"master\"'                        >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'SELFUPGRADE=\"false\"'                    >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PORT=\"443\"'                             >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'AUTOCERT=\"true\"'                        >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PATH_TO_HTTPS_CERT=\"/opt/xo/xohl.crt\"'  >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PATH_TO_HTTPS_KEY=\"/opt/xo/xohl.key\"'   >> /tmp/xoa-installer/xo-install.cfg"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "echo '==> Running XOA installation (this will take a while)...'",
-        "cd /tmp/xoa-installer && ./xo-install.sh --install",
-        "echo '==> Cleaning up install files...'",
-        "apt-get clean",
+        "echo '==> Cleaning up...'",
+        "dnf clean all",
         "rm -rf /tmp/xoa-installer",
         "rm -rf /tmp/xen-orchestra-patched"
       ]
@@ -282,23 +384,26 @@ cat << EOF > xoa-build.json
     }
   ]
 }
-EOF
+PACKEREOF
 
 echo -e "\n=========================================================="
-echo "  Setup Complete! Your environment is ready.              "
+echo "  Setup Complete! Your AlmaLinux environment is ready.   "
 echo "=========================================================="
+echo ""
+echo "Build machine: Linux Mint (as requested)"
+echo "Target OS: AlmaLinux $ALMALINUX_VERSION (Latest LTS)"
+echo "Filesystem: EXT (not LVM, as requested)"
+echo "Node.js: v22.x (minimum requirement)"
+echo ""
+echo "Generated files:"
+echo "  - $BUILD_DIR/ks.cfg (Kickstart with all packages)"
+echo "  - $BUILD_DIR/almalinux-build.json (Packer template)"
+echo ""
 echo "Next steps:"
 echo "1. cd $BUILD_DIR"
-echo "2. packer validate xoa-build.json"
-echo "3. packer build xoa-build.json"
-
-cd "$BUILD_DIR"
-pwd
-packer validate xoa-build.json
-PACKER_LOG=1 packer build xoa-build.json
-cd /root/xoa-build/output-xva/
-echo -e "\n=========================================================="
-echo "  Moving and compressing the XOA image.                   "
-echo "=========================================================="
-gzip --best xoa-hl.xva && mv xoa-hl.xva.gz /home/matth/
-chown matth:matth /home/matth/xoa-hl.xva.gz
+echo "2. packer validate almalinux-build.json"
+echo "3. packer build almalinux-build.json"
+echo "4. Check output-xva/ for the XVA image"
+echo ""
+echo "xe-guest-utilities source: https://releases.xenserver.com/packages/main/xe-guest-utilities/"
+echo "Node.js 22.x setup: curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
