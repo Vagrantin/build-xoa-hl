@@ -23,4 +23,5 @@ BUILD_DIR="$HOME/xoa-almalinux-build"
 
 # xe-guest-utilities URL (hosted by xenserver.com)
 # Installed via Packer provisioner, not in Kickstart
-XE_GUEST_UTILITIES_URL="https://releases.xenserver.com/packages/main/xe-guest-utilities/xe-guest-utilities-10.0.0-1.el9.x86_64.rpm"
+XE_GUEST_UTILITIES_URL="https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities-10.0.0-1.x86_64.rpm"
+XE_GUEST_UTILITIES_XENSTORE_URL="https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities-xenstore-10.0.0-1.x86_64.rpm"

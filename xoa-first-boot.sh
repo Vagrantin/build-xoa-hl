@@ -24,7 +24,7 @@ if ! command -v xenstore-read &>/dev/null; then
     exit 1
 fi
 echo "[$(date '+%H:%M:%S')] xenstore-read binary : $(command -v xenstore-read)"
-echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(dpkg -l xe-guest-utilities 2>/dev/null | awk '/^ii/{print $3}' || echo 'not found via dpkg')"
+echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(rpm -q xe-guest-utilities 2>/dev/null | echo 'not found via rpm')"
 
 # Check xenbus device node
 if [ -e /dev/xen/xenbus ]; then
