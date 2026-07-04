@@ -35,7 +35,7 @@ cleanup() {
     echo "[$(date '+%H:%M:%S')] First-boot complete. Removing log."
     # Small delay to flush the echo above before the fd is unlinked
     sync
-    rm -f "$LOG"
+    #rm -f "$LOG"
     # No echo here — fd is gone
 }
 trap cleanup EXIT

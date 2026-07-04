@@ -8,7 +8,7 @@ ConditionPathExists=!/var/lib/xoa-first-boot.done
 
 [Service]
 Type=oneshot
-ExecStart=/opt/xoa-first-boot.sh
+ExecStart=/root/xoa-first-boot.sh
 RemainAfterExit=yes
 StandardOutput=journal+console
 

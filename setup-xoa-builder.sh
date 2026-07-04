@@ -35,6 +35,9 @@ ALMALINUX_VERSION="${ALMALINUX_VERSION:-9}"
 ALMALINUX_ISO_URL="${ALMALINUX_ISO_URL:-https://repo.almalinux.org/almalinux/${ALMALINUX_VERSION}/isos/x86_64/AlmaLinux-${ALMALINUX_VERSION}-latest-x86_64-minimal.iso}"
 ALMALINUX_ISO_CHECKSUM="${ALMALINUX_ISO_CHECKSUM:-}"
 
+
+XOA_HL_REPO="${XOA_HL_REPO:-Vagrantin/xoa-hl}"
+
 echo "---> Using AlmaLinux version: $ALMALINUX_VERSION (Latest LTS)"
 echo "---> ISO URL: $ALMALINUX_ISO_URL"
 
@@ -120,6 +123,17 @@ if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
         exit 1
     fi
 fi
+
+# 7b. Resolve latest xoa-hl RPM download URL
+echo -e "\n---> Resolving latest xoa-hl RPM release..."
+XOA_HL_RPM_URL=$(curl -s "https://api.github.com/repos/${XOA_HL_REPO}/releases/latest" \
+    | grep "browser_download_url.*\.rpm" | cut -d '"' -f4)
+if [ -z "$XOA_HL_RPM_URL" ]; then
+    echo "ERROR: Could not resolve xoa-hl RPM download URL from GitHub releases."
+    exit 1
+fi
+echo "---> xoa-hl RPM: $XOA_HL_RPM_URL"
+
 # 8. Create build directory and generate files
 echo -e "\n---> Creating Project Directory & Files..."
 mkdir -p "$BUILD_DIR/patches"
@@ -199,8 +213,7 @@ systemctl enable chronyd --now
 
 # Install extra package not in base repo
 dnf install -y epel-release
-dnf install -y wget git
-systemctl enable chronyd
+dnf install -y wget nc vim
 
 # Create xo user for XOA
 groupadd -f xo
@@ -223,9 +236,9 @@ cat > almalinux-build.json << PACKEREOF
       "iso_checksum": "$ALMALINUX_ISO_CHECKSUM",
       "sr_name": "Local storage",
       "vm_name": "$VM_NAME",
-      "vm_description": "XOA Community Edition - AlmaLinux $ALMALINUX_VERSION - xo-lite compatible",
+      "vm_description": "XOA HomeLab Edition - AlmaLinux $ALMALINUX_VERSION",
       "disk_size": 10000,
-      "vm_memory": 4096,
+      "vm_memory": 2048,
       "http_directory": ".",
       "network_names": ["$VM_NETWORK_NAME"],
       "boot_command": [
@@ -255,34 +268,18 @@ cat > almalinux-build.json << PACKEREOF
         "echo '==> Installing xe-guest-utilities from github xenserver...'",
         "wget -q ${XE_GUEST_UTILITIES_URL} -O /tmp/xe-guest-utilities.rpm",
         "wget -q ${XE_GUEST_UTILITIES_XENSTORE_URL} -O /tmp/xe-guest-utilities-xenstore.rpm",
-        "dnf install -y /tmp/xe-guest-utilities.rpm",
         "dnf install -y /tmp/xe-guest-utilities-xenstore.rpm",
-        "rm -f /tmp/xe-guest-utilities.rpm",
-        "rm -f /tmp/xe-guest-utilities-xenstore.rpm"
+        "dnf install -y /tmp/xe-guest-utilities.rpm",
+        "rm -f /tmp/xe-guest-utilities-xenstore.rpm",
+        "rm -f /tmp/xe-guest-utilities.rpm"
       ]
     },
     {
       "type": "shell",
       "inline": [
-        "echo '==> Cloning XOA installer...'",
-        "git clone https://github.com/ronivay/XenOrchestraInstallerUpdater.git /tmp/xoa-installer",
-        "cd /tmp/xoa-installer && git checkout master"
-      ]
-    },
-    {
-      "type": "file",
-      "source": "patches/menu-hide-items.patch",
-      "destination": "/tmp/xoa-installer/"
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "echo '==> Cloning xen-orchestra source...'",
-        "git clone --depth 1 https://github.com/vatesfr/xen-orchestra.git /tmp/xen-orchestra-patched",
-        "cd /tmp/xen-orchestra-patched && git config user.name 'Packer Builder' && git config user.email 'packer@internal'",
-        "echo '==> Applying custom design patch...'",
-        "cd /tmp/xen-orchestra-patched && git apply /tmp/xoa-installer/menu-hide-items.patch",
-        "cd /tmp/xen-orchestra-patched && git add -A && git commit -m 'Apply custom design patch'"
+        "echo '==> Installing Node.js 24.x (NodeSource)...'",
+        "curl -fsSL https://rpm.nodesource.com/setup_24.x | bash -",
+        "dnf install -y nodejs"
       ]
     },
     {
@@ -290,44 +287,45 @@ cat > almalinux-build.json << PACKEREOF
       "inline": [
         "echo '==> Generating self-signed TLS certificate...'",
         "mkdir -p /opt/xo",
-        "openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xohl.key -out /opt/xo/xohl.crt -days 3650 -nodes -subj '/CN=xoa.local'"
+        "openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xoahl.key -out /opt/xo/xoahl.crt -days 3650 -nodes -subj '/CN=xoa.local'"
       ]
     },
     {
       "type": "shell",
       "inline": [
-        "echo '==> Writing xo-install.cfg...'",
-        "echo 'REPOSITORY=\"/tmp/xen-orchestra-patched\"' > /tmp/xoa-installer/xo-install.cfg",
-        "echo 'BRANCH=\"master\"'                        >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'SELFUPGRADE=\"false\"'                    >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PORT=\"443\"'                             >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'AUTOCERT=\"true\"'                        >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PATH_TO_HTTPS_CERT=\"/opt/xo/xohl.crt\"'  >> /tmp/xoa-installer/xo-install.cfg",
-        "echo 'PATH_TO_HTTPS_KEY=\"/opt/xo/xohl.key\"'   >> /tmp/xoa-installer/xo-install.cfg"
+        "echo '==> Installing xoa-hl RPM...'",
+        "curl -fsSL '${XOA_HL_RPM_URL}' -o /tmp/xoa-hl.rpm",
+        "dnf install -y /tmp/xoa-hl.rpm",
+        "rm -f /tmp/xoa-hl.rpm"
       ]
     },
     {
       "type": "shell",
       "inline": [
-        "echo '==> Running XOA installation...'",
-        "cd /tmp/xoa-installer && ./xo-install.sh --install"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "cd /opt/xo/xo-builds/xen-orchestra-*/ && yarn install --production --ignore-scripts --prefer-offline || true"
+        "echo '==> Writing xo-server config.toml...'",
+        "mkdir -p /root/.config/xo-server",
+        "cat > /root/.config/xo-server/config.toml << 'CFGEOF'",
+        "[http]",
+        "  [[http.listen]]",
+        "  port = 443",
+        "  cert = '/opt/xo/xoahl.crt'",
+        "  key = '/opt/xo/xoahl.key'",
+        "",
+        "[redis]",
+        "uri = 'redis://127.0.0.1:6379/0'",
+        "CFGEOF",
+        "systemctl restart xo-server || true"
       ]
     },
     {
       "type": "file",
       "source": "scripts/xoa-first-boot.sh",
-      "destination": "/opt/xoa-first-boot.sh"
+      "destination": "/root/xoa-first-boot.sh"
     },
     {
       "type": "file",
       "source": "scripts/xoa-credentials.sh",
-      "destination": "/opt/xoa-credentials.sh"
+      "destination": "/root/xoa-credentials.sh"
     },
     {
       "type": "file",
@@ -342,7 +340,7 @@ cat > almalinux-build.json << PACKEREOF
     {
       "type": "shell",
       "inline": [
-        "chmod +x /opt/xoa-first-boot.sh /opt/xoa-credentials.sh",
+        "chmod +x /root/xoa-first-boot.sh /root/xoa-credentials.sh",
         "systemctl daemon-reload",
         "systemctl enable xoa-first-boot.service xoa-credentials.service"
       ]
@@ -355,44 +353,27 @@ cat > almalinux-build.json << PACKEREOF
   iwl135-firmware iwl2000-firmware iwl2030-firmware iwl3160-firmware \
   iwl5000-firmware iwl5150-firmware iwl6000g2a-firmware \
   iwl6050-firmware iwl7260-firmware",
-	"dnf remove -y gcc gcc-c++ cpp binutils binutils-gold make patch \
-  git git-core git-core-doc \
-  glibc-devel glibc-headers kernel-headers kernel-tools kernel-tools-libs \
-  libxcrypt-devel openssl-devel libpng-devel zlib-devel libstdc++-devel \
-  yarn",
 	"dnf remove -y firewalld firewalld-filesystem python3-firewall python3-nftables \
   NetworkManager-team teamd libteam NetworkManager-tui \
   sssd-client sssd-common sssd-kcm sssd-nfs-idmap \
-  quota quota-nls irqbalance microcode_ctl \
-  rsyslog rsyslog-logrotate \
-  man-db groff-base info \
-  lshw lsscsi sg3_utils sg3_utils-libs pciutils-libs ethtool \
+  irqbalance microcode_ctl rsyslog rsyslog-logrotate \
+  man-db groff-base info lshw lsscsi \
+  sg3_utils sg3_utils-libs pciutils-libs ethtool \
   dracut-config-rescue",
 	"dnf remove -y selinux-policy selinux-policy-targeted policycoreutils",
 	"dnf autoremove -y",
         "dnf clean all",
 	"rm -rf /var/cache/dnf/ /var/log/*.log",
-        "rm -rf /tmp/xoa-installer",
-        "rm -rf /opt/xo/xo-src/",
         "rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*",
         "find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name 'en*' -exec rm -rf {} +",
-        "rm -rf /usr/share/i18n/locales",
-        "rm -rf /tmp/xen-orchestra-patched"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "find /opt/xo/xo-builds/*/packages/xo-web/dist -name '*.map' -delete"
+        "rm -rf /usr/share/i18n/locales"
       ]
     },
     {
       "type": "shell",
       "inline": [
         "echo '==> Stripping unique system identity...'",
-        "echo /etc/machine-id",
-        "echo -n > /etc/machine-id",
-        "echo /etc/machine-id"
+        "echo -n > /etc/machine-id"
       ]
     }
   ]
@@ -403,10 +384,10 @@ echo -e "\n=========================================================="
 echo "  Setup Complete! Your AlmaLinux environment is ready.   "
 echo "=========================================================="
 echo ""
-echo "Build machine: Linux Mint (as requested)"
-echo "Target OS: AlmaLinux $ALMALINUX_VERSION (Latest LTS)"
-echo "Filesystem: EXT (not LVM, as requested)"
-echo "Node.js: v22.x (minimum requirement)"
+echo "Build machine: Linux Mint"
+echo "Target OS: AlmaLinux $ALMALINUX_VERSION"
+echo "Filesystem: EXT"
+echo "Node.js: v24.x"
 echo ""
 echo "Generated files:"
 echo "  - $BUILD_DIR/inst.ks (Kickstart with all packages)"
@@ -422,5 +403,3 @@ cd "$BUILD_DIR"
 pwd
 packer validate almalinux-build.json
 PACKER_LOG=1 packer build almalinux-build.json
-echo "xe-guest-utilities source: https://releases.xenserver.com/packages/main/xe-guest-utilities/"
-echo "Node.js 22.x setup: curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -"
