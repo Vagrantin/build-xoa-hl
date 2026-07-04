@@ -285,36 +285,10 @@ cat > almalinux-build.json << PACKEREOF
     {
       "type": "shell",
       "inline": [
-        "echo '==> Generating self-signed TLS certificate...'",
-        "mkdir -p /opt/xo",
-        "openssl req -x509 -newkey rsa:4096 -keyout /opt/xo/xoahl.key -out /opt/xo/xoahl.crt -days 3650 -nodes -subj '/CN=xoa.local'"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
         "echo '==> Installing xoa-hl RPM...'",
         "curl -fsSL '${XOA_HL_RPM_URL}' -o /tmp/xoa-hl.rpm",
         "dnf install -y /tmp/xoa-hl.rpm",
         "rm -f /tmp/xoa-hl.rpm"
-      ]
-    },
-    {
-      "type": "shell",
-      "inline": [
-        "echo '==> Writing xo-server config.toml...'",
-        "mkdir -p /root/.config/xo-server",
-        "cat > /root/.config/xo-server/config.toml << 'CFGEOF'",
-        "[http]",
-        "  [[http.listen]]",
-        "  port = 443",
-        "  cert = '/opt/xo/xoahl.crt'",
-        "  key = '/opt/xo/xoahl.key'",
-        "",
-        "[redis]",
-        "uri = 'redis://127.0.0.1:6379/0'",
-        "CFGEOF",
-        "systemctl restart xo-server || true"
       ]
     },
     {
