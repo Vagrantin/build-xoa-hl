@@ -125,9 +125,12 @@ if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
 fi
 
 # 7b. Resolve latest xoa-hl RPM download URL
+# Not releases/latest: xoa-hl also carries the xoa-image-* releases published
+# there before the VM images moved to build-xoa-hl, and those have no RPM asset.
+# Scan the list instead and take the newest release that actually ships one.
 echo -e "\n---> Resolving latest xoa-hl RPM release..."
-XOA_HL_RPM_URL=$(curl -s "https://api.github.com/repos/${XOA_HL_REPO}/releases/latest" \
-    | grep "browser_download_url.*\.rpm" | cut -d '"' -f4)
+XOA_HL_RPM_URL=$(curl -s "https://api.github.com/repos/${XOA_HL_REPO}/releases?per_page=30" \
+    | grep "browser_download_url.*\.rpm" | head -1 | cut -d '"' -f4)
 if [ -z "$XOA_HL_RPM_URL" ]; then
     echo "ERROR: Could not resolve xoa-hl RPM download URL from GitHub releases."
     exit 1

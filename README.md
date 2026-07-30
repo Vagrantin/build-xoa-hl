@@ -27,10 +27,25 @@ Packer-based pipeline that builds the **XOA Home-laber Edition VM appliance** (A
 2. Run `scripts/setup-xoa-builder.sh` from the build machine (developed on Linux Mint).
 3. Packer installs AlmaLinux via Kickstart, provisions xe-guest-utilities, and installs the first-boot systemd units so the resulting appliance self-configures (xenstore data, then admin credentials) when deployed through XO Lite.
 
-⚠️ `build.config` contains plaintext credentials — never commit it.
+⚠️ `build.config` contains plaintext credentials, never commit it.
+
+## Releases
+
+The XVA appliance is published as a **GitHub Release on this repository**,
+tagged `xoa-image-<date>-<sha7>` with the `xoa-almalinux.xva` asset. `<sha7>` is
+the `../xoa-hl` commit the image was built from. Releases are created by the
+orchestrator's `xoa-vm-agent` (see
+[`xcp-orchestrator`](https://github.com/Vagrantin/buildorchestration/tree/main/xcp-orchestrator)),
+and XO Lite's deploy button resolves the newest one at deploy time.
+
+Images used to be published on the `xoa-hl` repo
+([xcp-hl#22](https://github.com/Vagrantin/xcp-hl/issues/22)); the ones from
+before that switch are [still
+there](https://github.com/Vagrantin/xoa-hl/releases) so already-shipped ISOs
+keep resolving them.
 
 ## Related
 
-- `../xoa-hl` — builds the patched Xen Orchestra that runs inside this VM.
-- `../xolite-ce` — the XO Lite build that deploys this image.
-- `../xoa-proxy` — HTTPS/gzip bridge used during image deployment.
+- `../xoa-hl`, builds the patched Xen Orchestra that runs inside this VM.
+- `../xolite-ce`, the XO Lite build that deploys this image.
+- `../xoa-proxy`, HTTPS/gzip bridge used during image deployment.
