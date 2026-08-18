@@ -245,10 +245,12 @@ cat > almalinux-build.json << PACKEREOF
       "http_directory": ".",
       "network_names": ["$VM_NETWORK_NAME"],
       "boot_command": [
-        "<wait5><esc><wait>",
+        "<wait10>",
+        "<esc><wait2>",
+        "<esc><wait2>",
         "linux inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/inst.ks inst.text<enter>"
       ],
-      "boot_wait": "5s",
+      "boot_wait": "10s",
       "ssh_username": "root",
       "ssh_password": "$ALMALINUX_ROOT_PASSWORD",
       "ssh_timeout": "30m",
