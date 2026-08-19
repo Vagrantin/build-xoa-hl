@@ -8,6 +8,9 @@ set -e
 
 CONFIG_FILE="build.config"
 
+# Captured before sourcing the config so the environment can override the pin.
+XOA_HL_TAG_ENV="${XOA_HL_TAG:-}"
+
 echo "=========================================================="
 echo "  XOA-Lite Packer Build Environment Setup for AlmaLinux  "
 echo "  Running on Linux Mint build machine                  "
@@ -37,6 +40,8 @@ ALMALINUX_ISO_CHECKSUM="${ALMALINUX_ISO_CHECKSUM:-}"
 
 
 XOA_HL_REPO="${XOA_HL_REPO:-Vagrantin/xoa-hl}"
+# Exact xoa-hl release tag, e.g. v5.113.2_e281c536-ce1. Empty means newest ce release.
+XOA_HL_TAG="${XOA_HL_TAG_ENV:-${XOA_HL_TAG:-}}"
 
 echo "---> Using AlmaLinux version: $ALMALINUX_VERSION (Latest LTS)"
 echo "---> ISO URL: $ALMALINUX_ISO_URL"
@@ -124,18 +129,42 @@ if [ -z "$ALMALINUX_ISO_CHECKSUM" ]; then
     fi
 fi
 
-# 7b. Resolve latest xoa-hl RPM download URL
-# Not releases/latest: xoa-hl also carries the xoa-image-* releases published
-# there before the VM images moved to build-xoa-hl, and those have no RPM asset.
-# Scan the list instead and take the newest release that actually ships one.
-echo -e "\n---> Resolving latest xoa-hl RPM release..."
-XOA_HL_RPM_URL=$(curl -s "https://api.github.com/repos/${XOA_HL_REPO}/releases?per_page=30" \
-    | grep "browser_download_url.*\.rpm" | head -1 | cut -d '"' -f4)
-if [ -z "$XOA_HL_RPM_URL" ]; then
-    echo "ERROR: Could not resolve xoa-hl RPM download URL from GitHub releases."
-    exit 1
+# 7b. Resolve the xoa-hl RPM download URL
+# Each xoa-hl build publishes its own release tagged v{version}-ce{N}, one fat RPM.
+# Pinned XOA_HL_TAG wins, else the highest ce counter that ships an RPM.
+# URLs always come from the API, filenames are never predicted.
+if [ -n "$XOA_HL_TAG" ]; then
+    echo -e "\n---> Using pinned xoa-hl release: $XOA_HL_TAG"
+    XOA_HL_RPM_URL=$(curl -sf "https://api.github.com/repos/${XOA_HL_REPO}/releases/tags/${XOA_HL_TAG}" \
+        | jq -r '[.assets[]? | select(.name | endswith(".rpm")) | .browser_download_url] | last // empty')
+    if [ -z "$XOA_HL_RPM_URL" ]; then
+        echo "ERROR: No .rpm asset on ${XOA_HL_REPO} release tag '${XOA_HL_TAG}'."
+        exit 1
+    fi
+else
+    echo -e "\n---> No XOA_HL_TAG set, resolving the newest xoa-hl ce release..."
+    # Tab-separated "tag<TAB>url" so the build log names the tag that was chosen.
+    XOA_HL_SELECTION=$(curl -sf "https://api.github.com/repos/${XOA_HL_REPO}/releases?per_page=30" \
+        | jq -r '
+            [ .[]
+              | select(.tag_name | test("^v.*-ce[0-9]+$"))
+              | { tag: .tag_name,
+                  counter: (.tag_name | capture("-ce(?<n>[0-9]+)$").n | tonumber),
+                  url: ([.assets[]? | select(.name | endswith(".rpm")) | .browser_download_url] | last) }
+              | select(.url != null) ]
+            | sort_by(-.counter) | first
+            | if . == null then empty else "\(.tag)\t\(.url)" end')
+    if [ -z "$XOA_HL_SELECTION" ]; then
+        echo "ERROR: No ce release with an .rpm asset found on ${XOA_HL_REPO}."
+        echo "Set XOA_HL_TAG (build.config or environment) to pin an exact release tag."
+        exit 1
+    fi
+    XOA_HL_TAG="${XOA_HL_SELECTION%%$'\t'*}"
+    XOA_HL_RPM_URL="${XOA_HL_SELECTION#*$'\t'}"
+    echo "---> Selected newest ce release: $XOA_HL_TAG"
 fi
 echo "---> xoa-hl RPM: $XOA_HL_RPM_URL"
+echo "---> xoa-hl RPM filename: $(basename "$XOA_HL_RPM_URL")"
 
 # 8. Create build directory and generate files
 echo -e "\n---> Creating Project Directory & Files..."

@@ -21,6 +21,13 @@ ALMALINUX_ROOT_PASSWORD="MYSTRONGAlmaLinuxPassw0rd"
 VM_NAME="xoa-almalinux"
 BUILD_DIR="$HOME/xoa-almalinux-build"
 
+# xoa-hl release to install (repo, then exact tag)
+# XOA_HL_TAG pins one release, e.g. v5.113.2_e281c536-ce1, for a reproducible
+# image. Leave it unset to take the newest v*-ce<N> release carrying an RPM.
+# The XOA_HL_TAG environment variable overrides the value set here.
+XOA_HL_REPO="Vagrantin/xoa-hl"
+#XOA_HL_TAG="v5.113.2_e281c536-ce1"
+
 # xe-guest-utilities URL (hosted by xenserver.com)
 # Installed via Packer provisioner, not in Kickstart
 XE_GUEST_UTILITIES_URL="https://github.com/xenserver/xe-guest-utilities/releases/download/v10.0.0/xe-guest-utilities-10.0.0-1.x86_64.rpm"
