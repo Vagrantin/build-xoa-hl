@@ -103,17 +103,6 @@ SSH_PASSWORD=$(xs_read "system-account-xoa-password")
 # JSON blob key
 ADMIN_ACCOUNT_JSON=$(xs_read "admin-account")
 
-# Probe for any unexpected keys XO-Lite might add in future versions
-echo "[$(date '+%H:%M:%S')]   Probing additional known candidate keys..."
-for CANDIDATE in hostname domain nameservers mtu network-ref ssl-verify \
-                 ssh-login ssh-password xoa-admin-login xoa-admin-password \
-                 system-account-ssh-login; do
-    VAL=$(xenstore-read "${XS_BASE}/${CANDIDATE}" 2>/dev/null || echo "")
-    if [ -n "$VAL" ]; then
-        echo "[$(date '+%H:%M:%S')]   UNEXPECTED KEY FOUND: $CANDIDATE = $VAL"
-    fi
-done
-
 # --- JSON parsing ---
 echo ""
 echo "[$(date '+%H:%M:%S')] [5/6] Parsing admin-account JSON blob..."
@@ -123,20 +112,7 @@ if [ -z "$ADMIN_ACCOUNT_JSON" ]; then
     XOA_EMAIL=""
     XOA_PASSWORD=""
 else
-    echo "[$(date '+%H:%M:%S')] admin-account raw length : ${#ADMIN_ACCOUNT_JSON} bytes"
-    # Print with password masked
-    MASKED=$(echo "$ADMIN_ACCOUNT_JSON" | \
-        python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    d['password'] = '***masked***'
-    print(json.dumps(d))
-except Exception as e:
-    print('JSON parse error: ' + str(e))
-" 2>/dev/null)
-    echo "[$(date '+%H:%M:%S')] admin-account masked     : $MASKED"
-
+    echo "[$(date '+%H:%M:%S')] admin-account exist"
     # Check python3 availability
     if ! command -v python3 &>/dev/null; then
         echo "[$(date '+%H:%M:%S')] FATAL: python3 not found — cannot parse JSON"
@@ -153,23 +129,9 @@ except Exception as e:
 
     [ -n "$XOA_EMAIL" ]    && echo "[$(date '+%H:%M:%S')] email parsed OK : $XOA_EMAIL" \
                            || echo "[$(date '+%H:%M:%S')] WARNING: email field empty after parse"
-    [ -n "$XOA_PASSWORD" ] && echo "[$(date '+%H:%M:%S')] password parsed OK : (set, ${#XOA_PASSWORD} chars)" \
+    [ -n "$XOA_PASSWORD" ] && echo "[$(date '+%H:%M:%S')] password parsed OK" \
                            || echo "[$(date '+%H:%M:%S')] WARNING: password field empty after parse"
 fi
-
-# --- Summary and env file ---
-echo ""
-echo "[$(date '+%H:%M:%S')] [6/6] Summary and persisting env file..."
-echo "[$(date '+%H:%M:%S')] ip           : ${IP:-(empty → DHCP)}"
-echo "[$(date '+%H:%M:%S')] netmask      : ${NETMASK:-(empty)}"
-echo "[$(date '+%H:%M:%S')] gateway      : ${GATEWAY:-(empty)}"
-echo "[$(date '+%H:%M:%S')] dns          : ${DNS:-(empty)}"
-echo "[$(date '+%H:%M:%S')] ntp          : ${NTP:-(empty)}"
-echo "[$(date '+%H:%M:%S')] xoa_email    : ${XOA_EMAIL:-(not set)}"
-echo "[$(date '+%H:%M:%S')] xoa_password : ${XOA_PASSWORD:+(set, ${#XOA_PASSWORD} chars)}"
-[ -z "$XOA_PASSWORD" ]  && echo "[$(date '+%H:%M:%S')] xoa_password : (not set)"
-echo "[$(date '+%H:%M:%S')] ssh_password : ${SSH_PASSWORD:+(set, ${#SSH_PASSWORD} chars)}"
-[ -z "$SSH_PASSWORD" ]  && echo "[$(date '+%H:%M:%S')] ssh_password : (not set)"
 
 # Validation pass/fail before writing env file
 ERRORS=0
@@ -179,16 +141,11 @@ ERRORS=0
 [ -z "$SSH_PASSWORD" ]       && echo "[$(date '+%H:%M:%S')] FAIL: system-account-xoa-password missing" && ERRORS=$((ERRORS+1))
 [ "$ERRORS" -eq 0 ]          && echo "[$(date '+%H:%M:%S')] PASS: all expected keys present ($ERRORS errors)"
 
-cat > /etc/xoa-first-boot.env << ENVEOF
-IP="${IP}"
-NETMASK="${NETMASK}"
-GATEWAY="${GATEWAY}"
-DNS="${DNS}"
-NTP="${NTP}"
-XOA_EMAIL="${XOA_EMAIL}"
-XOA_PASSWORD="${XOA_PASSWORD}"
-SSH_PASSWORD="${SSH_PASSWORD}"
-ENVEOF
+{
+    printf 'XOA_EMAIL=%s\n' "$(printf '%s' "$XOA_EMAIL" | base64 -w0)"
+    printf 'XOA_PASSWORD=%s\n' "$(printf '%s' "$XOA_PASSWORD" | base64 -w0)"
+    printf 'SSH_PASSWORD=%s\n' "$(printf '%s' "$SSH_PASSWORD" | base64 -w0)"
+} > /etc/xoa-first-boot.env
 chmod 600 /etc/xoa-first-boot.env
 
 echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
@@ -225,13 +182,11 @@ addr-gen-mode=default
 NMEOF
 
 else
-    # Convert dotted netmask to CIDR prefix length
     CIDR=$(python3 -c "
 import ipaddress
 print(ipaddress.IPv4Network('0.0.0.0/${NETMASK}', strict=False).prefixlen)
 " 2>/dev/null || echo "24")
 
-    # NM dns format: semicolon-separated with trailing semicolon
     DNS_NM="${DNS};"
 
     echo "[$(date '+%H:%M:%S')] Static IP  : ${IP}/${CIDR}"

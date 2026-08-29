@@ -58,12 +58,16 @@ fi
 echo "[$(date)] Sourcing credentials from $ENV_FILE"
 source "$ENV_FILE"
 
+# Values were base64-encoded on write; decode before use.
+XOA_EMAIL=$(printf '%s' "$XOA_EMAIL" | base64 -d)
+XOA_PASSWORD=$(printf '%s' "$XOA_PASSWORD" | base64 -d)
+SSH_PASSWORD=$(printf '%s' "$SSH_PASSWORD" | base64 -d)
+
 NEW_LOGIN="$XOA_EMAIL"
 NEW_PASSWORD="$XOA_PASSWORD"
 
-# Ronivay defaults — used to bootstrap the API connection
-BOOTSTRAP_EMAIL="admin@admin.net"
-BOOTSTRAP_PASSWORD="admin"
+DEFAULT_EMAIL="admin@admin.net"
+DEFAULT_PASSWORD="admin"
 XO_URL="wss://127.0.0.1"
 
 if [ -z "$NEW_LOGIN" ] && [ -z "$NEW_PASSWORD" ]; then
@@ -93,7 +97,6 @@ echo "[$(date '+%H:%M:%S')] [7/8] Setting SSH system account password..."
 if [ -z "$SSH_PASSWORD" ]; then
     echo "[$(date '+%H:%M:%S')] WARN: SSH_PASSWORD is empty — skipping password change."
 else
-    # Ronivay creates the 'xo' user by default
     SSH_LOGIN="xo"
 
     if ! id "$SSH_LOGIN" &>/dev/null; then
@@ -110,7 +113,7 @@ else
 fi
 
 # Register xo-cli with bootstrap credentials
-xo-cli register --allowUnauthorized "$XO_URL" "$BOOTSTRAP_EMAIL" "$BOOTSTRAP_PASSWORD" \
+xo-cli register --allowUnauthorized "$XO_URL" "$DEFAULT_EMAIL" "$DEFAULT_PASSWORD" \
     >> "$LOG" 2>&1 || {
     echo "[$(date)] ERROR: xo-cli registration failed with bootstrap credentials."
     exit 1
@@ -120,13 +123,13 @@ xo-cli register --allowUnauthorized "$XO_URL" "$BOOTSTRAP_EMAIL" "$BOOTSTRAP_PAS
 if [ -n "$NEW_PASSWORD" ]; then
     echo "[$(date)] Updating admin password..."
     xo-cli user.changePassword \
-        oldPassword="$BOOTSTRAP_PASSWORD" \
+        oldPassword="$DEFAULT_PASSWORD" \
         newPassword="$NEW_PASSWORD" >> "$LOG" 2>&1 || \
     echo "[$(date)] WARN: Password change failed (may already be changed)"
 fi
 
 # Change the email/login if different from default
-if [ -n "$NEW_LOGIN" ] && [ "$NEW_LOGIN" != "$BOOTSTRAP_EMAIL" ]; then
+if [ -n "$NEW_LOGIN" ] && [ "$NEW_LOGIN" != "$DEFAULT_EMAIL" ]; then
     echo "[$(date '+%H:%M:%S')] Updating admin email to: $NEW_LOGIN"
 
     echo "[$(date '+%H:%M:%S')] Fetching user list..."
