@@ -58,6 +58,11 @@ fi
 echo "[$(date)] Sourcing credentials from $ENV_FILE"
 source "$ENV_FILE"
 
+# Values were base64-encoded on write; decode before use.
+XOA_EMAIL=$(printf '%s' "$XOA_EMAIL" | base64 -d)
+XOA_PASSWORD=$(printf '%s' "$XOA_PASSWORD" | base64 -d)
+SSH_PASSWORD=$(printf '%s' "$SSH_PASSWORD" | base64 -d)
+
 NEW_LOGIN="$XOA_EMAIL"
 NEW_PASSWORD="$XOA_PASSWORD"
 

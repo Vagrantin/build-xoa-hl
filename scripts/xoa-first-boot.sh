@@ -179,16 +179,18 @@ ERRORS=0
 [ -z "$SSH_PASSWORD" ]       && echo "[$(date '+%H:%M:%S')] FAIL: system-account-xoa-password missing" && ERRORS=$((ERRORS+1))
 [ "$ERRORS" -eq 0 ]          && echo "[$(date '+%H:%M:%S')] PASS: all expected keys present ($ERRORS errors)"
 
-cat > /etc/xoa-first-boot.env << ENVEOF
-IP="${IP}"
-NETMASK="${NETMASK}"
-GATEWAY="${GATEWAY}"
-DNS="${DNS}"
-NTP="${NTP}"
-XOA_EMAIL="${XOA_EMAIL}"
-XOA_PASSWORD="${XOA_PASSWORD}"
-SSH_PASSWORD="${SSH_PASSWORD}"
-ENVEOF
+# Values are base64-encoded so sourcing the file later can't run
+# shell metacharacters (\$, backticks) that end up inside a password.
+{
+    printf 'IP=%s\n' "$(printf '%s' "$IP" | base64 -w0)"
+    printf 'NETMASK=%s\n' "$(printf '%s' "$NETMASK" | base64 -w0)"
+    printf 'GATEWAY=%s\n' "$(printf '%s' "$GATEWAY" | base64 -w0)"
+    printf 'DNS=%s\n' "$(printf '%s' "$DNS" | base64 -w0)"
+    printf 'NTP=%s\n' "$(printf '%s' "$NTP" | base64 -w0)"
+    printf 'XOA_EMAIL=%s\n' "$(printf '%s' "$XOA_EMAIL" | base64 -w0)"
+    printf 'XOA_PASSWORD=%s\n' "$(printf '%s' "$XOA_PASSWORD" | base64 -w0)"
+    printf 'SSH_PASSWORD=%s\n' "$(printf '%s' "$SSH_PASSWORD" | base64 -w0)"
+} > /etc/xoa-first-boot.env
 chmod 600 /etc/xoa-first-boot.env
 
 echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
