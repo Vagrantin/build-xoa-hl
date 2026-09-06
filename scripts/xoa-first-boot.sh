@@ -120,10 +120,10 @@ else
     fi
     echo "[$(date '+%H:%M:%S')] python3 version : $(python3 --version 2>&1)"
 
-    XOA_EMAIL=$(echo "$ADMIN_ACCOUNT_JSON" | \
+    XOA_EMAIL=$(printf '%s' "$ADMIN_ACCOUNT_JSON" | \
         python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('email',''))" \
         2>/dev/null || echo "")
-    XOA_PASSWORD=$(echo "$ADMIN_ACCOUNT_JSON" | \
+    XOA_PASSWORD=$(printf '%s' "$ADMIN_ACCOUNT_JSON" | \
         python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('password',''))" \
         2>/dev/null || echo "")
 
