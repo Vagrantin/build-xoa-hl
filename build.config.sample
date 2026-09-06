@@ -14,7 +14,9 @@ ALMALINUX_ISO_URL="https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-
 # Run: sha256sum AlmaLinux-9-latest-x86_64-minimal.iso
 ALMALINUX_ISO_CHECKSUM=""
 
-# VM Root Password
+# VM Root Password (temporary, used during install only)
+# WARNING: This password is BURNED/LOCKED after build completes.
+# The root account will be locked and SSH root login disabled.
 ALMALINUX_ROOT_PASSWORD="MYSTRONGAlmaLinuxPassw0rd"
 
 # VM Settings
