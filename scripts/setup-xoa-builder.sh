@@ -383,6 +383,16 @@ cat > almalinux-build.json << PACKEREOF
         "echo '==> Stripping unique system identity...'",
         "echo -n > /etc/machine-id"
       ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Security: Burning root password and locking account...'",
+        "openssl rand -base64 32 | chpasswd -e",
+        "passwd -l root",
+        "sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config",
+        "systemctl restart sshd"
+      ]
     }
   ]
 }
