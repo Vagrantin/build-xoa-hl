@@ -1,0 +1,48 @@
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+# the default is not to use systemd for cgroups because the delegate issues still
+# exists and systemd currently does not support the cgroup feature set required
+# for containers run by docker
+ExecStart=/usr/bin/dockerd
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+
+# Note that StartLimit* settings may allow ExeStart to be run an extra time
+# or two after it has failed for the first time which may in some cases
+# allow a container to start that would not have done so otherwise (e.g.
+# when the host was under high load and the container start took longer
+# than usual).
+StartLimitBurst=3
+
+# Note that StartLimitInterval may be used to override the default 60s interval
+# used when restarting the service. For example, to force restarts to occur
+# faster: StartLimitInterval=0
+
+# Note that StartLimitBurst may be used to allow starting a service
+# multiple times in a set interval. For example, StartLimitBurst=3
+# would allow 3 starts in 10s (the default StartLimitInterval) before
+# hitting the rate limit.
+
+LimitNOFILE=1048576
+LimitNPROC=1048576
+LimitCORE=infinity
+
+# Set delegate yes so that systemd does not reset the cgroups of docker containers
+Delegate=yes
+
+# Kill mode for docker is 'none' by default, but for some reason this prevents
+# the cgroup from being cleaned up properly on shutdown. This needs to be
+# investigated, but for now we'll use 'control-group' which will at least
+# ensure the cgroup is cleaned up on shutdown.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
