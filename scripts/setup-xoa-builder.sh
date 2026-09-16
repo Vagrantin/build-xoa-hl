@@ -284,7 +284,7 @@ cat > almalinux-build.json << PACKEREOF
       "ssh_password": "$ALMALINUX_ROOT_PASSWORD",
       "ssh_timeout": "30m",
       "format": "xva_compressed",
-      "keep_vm": "always",
+      "keep_vm": "never",
       "skip_set_template": "true"
     }
   ],
