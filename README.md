@@ -54,7 +54,7 @@ for local runs.
 ## Releases
 
 The XVA appliance is published as a **GitHub Release on this repository**,
-tagged `xoa-image-<date>-<sha7>` with the `xoa-almalinux.xva` asset. `<sha7>` is
+tagged `xoa-image-<date>-<sha7>` with the `XOA-hl.xva` asset. `<sha7>` is
 the `../xoa-hl` commit the image was built from. Releases are created by the
 orchestrator's `xoa-vm-agent` (see
 [`xcp-orchestrator`](https://github.com/Vagrantin/buildorchestration/tree/main/xcp-orchestrator)),

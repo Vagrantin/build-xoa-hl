@@ -20,7 +20,7 @@ ALMALINUX_ISO_CHECKSUM=""
 ALMALINUX_ROOT_PASSWORD="MYSTRONGAlmaLinuxPassw0rd"
 
 # VM Settings
-VM_NAME="xoa-almalinux"
+VM_NAME="XOA-hl"
 BUILD_DIR="$HOME/xoa-almalinux-build"
 
 # xoa-hl release to install (repo, then exact tag)
