@@ -20,10 +20,6 @@ ALMALINUX_ISO_CHECKSUM=""
 ALMALINUX_ROOT_PASSWORD="MYSTRONGAlmaLinuxPassw0rd"
 
 # VM Settings
-# VM_NAME is baked into the XVA as the VM's name-label, so it is what XO Lite
-# shows for the appliance once deployed, and it also names the output file
-# (output-xva/$VM_NAME.xva, the release asset). Keep it aligned with the
-# product name. See xcp-hl#97.
 VM_NAME="XOA-hl"
 BUILD_DIR="$HOME/xoa-almalinux-build"
 
