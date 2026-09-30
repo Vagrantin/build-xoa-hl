@@ -56,6 +56,7 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 echo "[$(date)] Sourcing credentials from $ENV_FILE"
+# shellcheck source=/dev/null # written at first boot by xoa-first-boot.sh
 source "$ENV_FILE"
 
 # Values were base64-encoded on write; decode before use.
