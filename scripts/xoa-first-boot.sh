@@ -24,7 +24,7 @@ if ! command -v xenstore-read &>/dev/null; then
     exit 1
 fi
 echo "[$(date '+%H:%M:%S')] xenstore-read binary : $(command -v xenstore-read)"
-echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(rpm -q xe-guest-utilities 2>/dev/null | echo 'not found via rpm')"
+echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(rpm -q xe-guest-utilities 2>/dev/null || echo 'not found via rpm')"
 
 # Check xenbus device node
 if [ -e /dev/xen/xenbus ]; then
@@ -97,6 +97,7 @@ IP=$(xs_read "ip")
 NETMASK=$(xs_read "netmask")
 GATEWAY=$(xs_read "gateway")
 DNS=$(xs_read "dns")
+# shellcheck disable=SC2034 # read but not applied yet: Vagrantin/xcp-hl#156
 NTP=$(xs_read "ntp-servers")
 SSH_PASSWORD=$(xs_read "system-account-xoa-password")
 

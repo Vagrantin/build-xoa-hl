@@ -19,6 +19,7 @@ echo "=========================================================="
 # 1. Load external config
 if [ -f "$CONFIG_FILE" ]; then
     echo "---> Found external configuration: loading $CONFIG_FILE..."
+    # shellcheck source=/dev/null # the operator's build.config, not in the repo
     source "./$CONFIG_FILE"
 else
     echo "---> No external '$CONFIG_FILE' found. Proceeding with fallback defaults."
