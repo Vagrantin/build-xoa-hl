@@ -12,7 +12,7 @@ Packer-based pipeline that builds the **XOA Home-laber Edition VM appliance** (A
 │   ├── setup-xoa-builder.sh   # Runs on the build machine: loads build.config, generates
 │   │                          # the Kickstart (inst.ks) and Packer JSON, launches the build
 │   ├── xoa-first-boot.sh      # In-VM: reads XO Lite xenstore provisioning data on first boot
-│   └── xoa-credentials.sh     # In-VM phase 2: sets XO admin credentials via xo-cli, then
+│   └── xoa-credentials.sh     # In-VM phase 2: sets XO admin credentials (JSON-RPC), then
 │                              # disables itself (falls back to admin@admin.net / admin)
 ├── systemd/
 │   ├── xoa-first-boot.service
