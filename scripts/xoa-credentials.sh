@@ -113,49 +113,63 @@ else
     fi
 fi
 
-# Register xo-cli with bootstrap credentials
-xo-cli register --allowUnauthorized "$XO_URL" "$DEFAULT_EMAIL" "$DEFAULT_PASSWORD" \
-    >> "$LOG" 2>&1 || {
-    echo "[$(date)] ERROR: xo-cli registration failed with bootstrap credentials."
-    exit 1
+# --- 8. Set admin email and password ---
+# JSON-RPC, not xo-cli: xo-cli turns the passwords "true"/"false" into booleans (xcp-hl#12).
+echo ""
+echo "[$(date '+%H:%M:%S')] [8/8] Applying admin credentials..."
+
+if ! XO_API_URL="${XO_URL}/api/" DEFAULT_EMAIL="$DEFAULT_EMAIL" DEFAULT_PASSWORD="$DEFAULT_PASSWORD" \
+    NEW_LOGIN="$NEW_LOGIN" NEW_PASSWORD="$NEW_PASSWORD" NODE_TLS_REJECT_UNAUTHORIZED=0 \
+    node --input-type=module - <<'EOF'
+const env = process.env
+const ws = new WebSocket(env.XO_API_URL)
+const pending = new Map()
+let nextId = 0
+
+const call = (method, params) =>
+  new Promise((resolve, reject) => {
+    const id = ++nextId
+    pending.set(id, { resolve, reject })
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+  })
+
+// Notifications carry no id and are ignored.
+ws.onmessage = event => {
+  const msg = JSON.parse(event.data)
+  const waiter = msg.id !== undefined && pending.get(msg.id)
+  if (!waiter) return
+  pending.delete(msg.id)
+  if (msg.error) waiter.reject(new Error(JSON.stringify(msg.error)))
+  else waiter.resolve(msg.result)
 }
 
-# Change the password
-if [ -n "$NEW_PASSWORD" ]; then
-    echo "[$(date)] Updating admin password..."
-    xo-cli user.changePassword \
-        oldPassword="$DEFAULT_PASSWORD" \
-        newPassword="$NEW_PASSWORD" >> "$LOG" 2>&1 || \
-    echo "[$(date)] WARN: Password change failed (may already be changed)"
-fi
+ws.onerror = () => {
+  console.error(`cannot reach ${env.XO_API_URL}`)
+  process.exit(1)
+}
 
-# Change the email/login if different from default
-if [ -n "$NEW_LOGIN" ] && [ "$NEW_LOGIN" != "$DEFAULT_EMAIL" ]; then
-    echo "[$(date '+%H:%M:%S')] Updating admin email to: $NEW_LOGIN"
-
-    echo "[$(date '+%H:%M:%S')] Fetching user list..."
-    RAW_USERS=$(xo-cli user.getAll 2>&1)
-    echo "[$(date '+%H:%M:%S')] user.getAll output:"
-
-    # xo-cli outputs JS object notation (not JSON) — parse with grep/sed
-    # Format is:  id: 'b6d07d80-c404-4ac8-96a6-38a2d74551f3',
-    USER_UUID=$(echo "$RAW_USERS" \
-        | grep -E "^\s+id:" \
-        | head -1 \
-        | sed "s/.*id: '//;s/'.*//")
-
-    echo "[$(date '+%H:%M:%S')] USER_UUID resolved: '${USER_UUID}'"
-
-    if [ -z "$USER_UUID" ]; then
-        echo "[$(date '+%H:%M:%S')] WARN: Could not resolve USER_UUID — email not changed."
-    else
-        echo "[$(date '+%H:%M:%S')] Calling user.set..."
-        xo-cli user.set \
-            id="$USER_UUID" \
-            email="$NEW_LOGIN" && \
-            echo "[$(date '+%H:%M:%S')] Email updated to: $NEW_LOGIN" || \
-            echo "[$(date '+%H:%M:%S')] WARN: user.set failed."
-    fi
+ws.onopen = async () => {
+  try {
+    const user = await call('session.signIn', { email: env.DEFAULT_EMAIL, password: env.DEFAULT_PASSWORD })
+    console.log(`Signed in as ${env.DEFAULT_EMAIL}`)
+    if (env.NEW_PASSWORD) {
+      await call('user.changePassword', { oldPassword: env.DEFAULT_PASSWORD, newPassword: env.NEW_PASSWORD })
+      console.log('Admin password updated')
+    }
+    if (env.NEW_LOGIN && env.NEW_LOGIN !== env.DEFAULT_EMAIL) {
+      await call('user.set', { id: user.id, email: env.NEW_LOGIN })
+      console.log(`Admin email updated to: ${env.NEW_LOGIN}`)
+    }
+    process.exit(0)
+  } catch (err) {
+    console.error(err.message)
+    process.exit(1)
+  }
+}
+EOF
+then
+    echo "[$(date '+%H:%M:%S')] ERROR: applying admin credentials failed."
+    exit 1
 fi
 # Cleanup secrets from tmpfs
 rm -f /run/xoa-provision/admin-login /run/xoa-provision/admin-password
