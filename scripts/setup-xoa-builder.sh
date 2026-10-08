@@ -327,6 +327,15 @@ cat > almalinux-build.json << PACKEREOF
       ]
     },
     {
+      "type": "shell",
+      "inline": [
+        "echo '==> Stamping the appliance release...'",
+        "rel=\$(rpm -q --qf '%{RELEASE}' xoa-hl); sha=\$(echo \$rel | cut -d. -f2)",
+        "echo \"built $(date -u +%F), commit \${sha#g}, release ${XOA_HL_TAG}\" > /etc/xoa-hl-vm-release",
+        "cat /etc/xoa-hl-vm-release"
+      ]
+    },
+    {
       "type": "file",
       "source": "scripts/xoa-first-boot.sh",
       "destination": "/root/xoa-first-boot.sh"

@@ -66,6 +66,13 @@ before that switch are [still
 there](https://github.com/Vagrantin/xoa-hl/releases) so already-shipped ISOs
 keep resolving them.
 
+## Release stamp
+
+The image carries `/etc/xoa-hl-vm-release`, one readable line such as
+`built 2026-10-08, commit abc1234, release v5.113.2_e281c536-ce1`: the build
+date, the xoa-hl commit and the xoa-hl release tag the image was built from.
+The XOA-HL About page shows it as the VM version.
+
 ## Related
 
 - `../xoa-hl`, builds the patched Xen Orchestra that runs inside this VM.
