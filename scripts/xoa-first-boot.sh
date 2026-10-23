@@ -152,7 +152,7 @@ chmod 600 /etc/xoa-first-boot.env
 echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
 
 # --- 6. Apply custom NTP servers ---
-# Runs before chronyd starts, so editing chrony.conf is enough (xcp-hl#156).
+# The unit is ordered Before=chronyd.service, so chronyd reads this file once it is written (xcp-hl#156).
 echo ""
 echo "[$(date '+%H:%M:%S')] [6/7] Applying custom NTP servers..."
 
