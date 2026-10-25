@@ -3,7 +3,8 @@ Description=XOA First Boot - Network & SSH provisioning from XenStore
 # Must run before the network comes up so we write interfaces first
 DefaultDependencies=no
 After=local-fs.target sysinit.target
-Before=network.target networking.service NetworkManager.service
+# chronyd too: it reads chrony.conf once, at start, and step 6 writes the custom NTP servers (xcp-hl#156)
+Before=network.target networking.service NetworkManager.service chronyd.service
 ConditionPathExists=!/var/lib/xoa-first-boot.done
 
 [Service]
