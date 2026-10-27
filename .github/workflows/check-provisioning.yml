@@ -1,0 +1,18 @@
+name: Check credential provisioning
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  provisioning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck redis-server
+      - run: bash ci/check.sh
+      - run: python3 ci/test-redis-durability.py -v

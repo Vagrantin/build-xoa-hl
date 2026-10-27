@@ -1,6 +1,12 @@
 #!/bin/bash
 # /opt/xoa-read-xenstore.sh
-# Reads XO-Lite xenstore provisioning data with verbose diagnostic logging.
+# Read provisioning secrets without logging them; retain a durable retry envelope.
+set -euo pipefail
+umask 077
+
+# A previous successful capture must survive a reboot after XAPI cleanup.
+[ ! -f /var/lib/xoa-credentials.done ] || exit 0
+[ ! -f /etc/xoa-first-boot.env ] || exit 0
 
 LOG="/var/log/xoa-first-boot.log"
 exec >> "$LOG" 2>&1
@@ -41,8 +47,8 @@ fi
 echo ""
 echo "[$(date '+%H:%M:%S')] [2/6] Resolving domid..."
 
-DOMID=$(xenstore-read domid 2>&1)
-XS_DOMID_EXIT=$?
+XS_DOMID_EXIT=0
+DOMID=$(xenstore-read domid 2>/dev/null) || XS_DOMID_EXIT=$?
 echo "[$(date '+%H:%M:%S')] xenstore-read domid exit_code=$XS_DOMID_EXIT value='$DOMID'"
 
 if [ $XS_DOMID_EXIT -ne 0 ] || [ -z "$DOMID" ]; then
@@ -56,18 +62,7 @@ echo "[$(date '+%H:%M:%S')] domid resolved : $DOMID"
 XS_BASE="/local/domain/$DOMID/vm-data"
 echo "[$(date '+%H:%M:%S')] xenstore base path : $XS_BASE"
 
-# --- Raw xenstore dump ---
-echo ""
-echo "[$(date '+%H:%M:%S')] [3/6] Raw xenstore dump of entire /local/domain/$DOMID/ ..."
-
-# xenstore-ls the parent to see what nodes exist at all
-echo "[$(date '+%H:%M:%S')] --- xenstore-ls /local/domain/$DOMID ---"
-xenstore-ls /local/domain/$DOMID 2>&1 || \
-    echo "[$(date '+%H:%M:%S')] WARNING: xenstore-ls on domain root failed (EINVAL is normal if no explicit dir node)"
-
-echo "[$(date '+%H:%M:%S')] --- xenstore-ls $XS_BASE ---"
-xenstore-ls "$XS_BASE" 2>&1 || \
-    echo "[$(date '+%H:%M:%S')] WARNING: xenstore-ls on vm-data failed — reading leaf keys directly instead"
+# Never dump XenStore: it contains plaintext provisioning credentials.
 
 # --- Key reading ---
 echo ""
@@ -80,14 +75,14 @@ xs_read() {
     local RAW_VALUE
     local EXIT_CODE
 
-    RAW_VALUE=$(xenstore-read "$FULL_PATH" 2>&1)
-    EXIT_CODE=$?
+    EXIT_CODE=0
+    RAW_VALUE=$(xenstore-read "$FULL_PATH" 2>/dev/null) || EXIT_CODE=$?
 
     if [ $EXIT_CODE -eq 0 ]; then
         echo "[$(date '+%H:%M:%S')]   READ OK  : $KEY (${#RAW_VALUE} bytes)" >&2
         echo "$RAW_VALUE"
     else
-        echo "[$(date '+%H:%M:%S')]   READ FAIL: $KEY → exit=$EXIT_CODE msg='$RAW_VALUE'" >&2
+        echo "[$(date '+%H:%M:%S')]   READ FAIL: $KEY → exit=$EXIT_CODE" >&2
         echo ""
     fi
 }
@@ -123,10 +118,10 @@ else
 
     XOA_EMAIL=$(echo "$ADMIN_ACCOUNT_JSON" | \
         python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('email',''))" \
-        2>/dev/null || echo "")
+        2>/dev/null)
     XOA_PASSWORD=$(echo "$ADMIN_ACCOUNT_JSON" | \
         python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('password',''))" \
-        2>/dev/null || echo "")
+        2>/dev/null)
 
     [ -n "$XOA_EMAIL" ]    && echo "[$(date '+%H:%M:%S')] email parsed OK : $XOA_EMAIL" \
                            || echo "[$(date '+%H:%M:%S')] WARNING: email field empty after parse"
@@ -139,17 +134,9 @@ ERRORS=0
 [ -z "$ADMIN_ACCOUNT_JSON" ] && echo "[$(date '+%H:%M:%S')] FAIL: admin-account missing"       && ERRORS=$((ERRORS+1))
 [ -z "$XOA_EMAIL" ]          && echo "[$(date '+%H:%M:%S')] FAIL: xoa email empty"             && ERRORS=$((ERRORS+1))
 [ -z "$XOA_PASSWORD" ]       && echo "[$(date '+%H:%M:%S')] FAIL: xoa password empty"          && ERRORS=$((ERRORS+1))
-[ -z "$SSH_PASSWORD" ]       && echo "[$(date '+%H:%M:%S')] FAIL: system-account-xoa-password missing" && ERRORS=$((ERRORS+1))
+# SSH_PASSWORD may be empty when SSH is disabled in XO Lite.
+[ "$ERRORS" -eq 0 ] || { echo 'Missing administrator credentials; refusing to start networking'; exit 1; }
 [ "$ERRORS" -eq 0 ]          && echo "[$(date '+%H:%M:%S')] PASS: all expected keys present ($ERRORS errors)"
-
-{
-    printf 'XOA_EMAIL=%s\n' "$(printf '%s' "$XOA_EMAIL" | base64 -w0)"
-    printf 'XOA_PASSWORD=%s\n' "$(printf '%s' "$XOA_PASSWORD" | base64 -w0)"
-    printf 'SSH_PASSWORD=%s\n' "$(printf '%s' "$SSH_PASSWORD" | base64 -w0)"
-} > /etc/xoa-first-boot.env
-chmod 600 /etc/xoa-first-boot.env
-
-echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
 
 # --- 6. Apply custom NTP servers ---
 # The unit is ordered Before=chronyd.service, so chronyd reads this file once it is written (xcp-hl#156).
@@ -254,3 +241,19 @@ cat "$NM_CONN_FILE"
 echo "============================================================"
 echo " xoa-read-xenstore  finished at $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
+
+# Persist before XO Lite observes the guest IP and removes the XAPI keys.
+{
+    printf 'XOA_EMAIL=%s\n' "$(printf '%s' "$XOA_EMAIL" | base64 -w0)"
+    printf 'XOA_PASSWORD=%s\n' "$(printf '%s' "$XOA_PASSWORD" | base64 -w0)"
+    printf 'SSH_PASSWORD=%s\n' "$(printf '%s' "$SSH_PASSWORD" | base64 -w0)"
+} > /etc/xoa-first-boot.env.tmp
+sync -f /etc/xoa-first-boot.env.tmp
+mv /etc/xoa-first-boot.env.tmp /etc/xoa-first-boot.env
+sync -f /etc
+
+
+# This clears the live guest copy; XO Lite clears the persistent XAPI map.
+for key in admin-account system-account-xoa-password xoa-updater-credentials; do
+    xenstore-rm "${XS_BASE}/${key}" 2>/dev/null || true
+done
