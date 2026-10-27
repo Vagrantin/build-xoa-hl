@@ -21,6 +21,20 @@ jobs:
         run: |
           docker build -t xoa-docker-protocol -f docker-host/Containerfile .
           docker run --rm --privileged xoa-docker-protocol
+      - name: Validate generated Packer configuration with the actual pinned plugin
+        env:
+          XCPNG_IP: '192.0.2.1'
+          XCPNG_USER: root
+          XCPNG_PASSWORD: validation-only
+          VM_NETWORK_NAME: validation-network
+          SR_NAME: validation-storage
+          ALMALINUX_ISO_URL: https://example.invalid/almalinux-9.iso
+          ALMALINUX_ISO_CHECKSUM: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          DOCKER_BUILD_PASSWORD: validationOnlyPassword123456789
+        run: |
+          python3 docker-host/generate-packer.py
+          docker build -t xoa-docker-packer -f docker-host/Packer.Containerfile .
+          docker run --rm -v "$PWD:/work" -w /work xoa-docker-packer validate docker-host/packer.json
   image:
     if: github.event_name == 'workflow_dispatch' && inputs.build_image
     needs: protocol
