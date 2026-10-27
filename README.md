@@ -104,7 +104,10 @@ the image's provisioning scripts or migrate its Redis configuration.
   updates the original default user, verifies a fresh login, checks `SAVE`,
   restores `everysec`, syncs the filesystem, and only then writes/syncs the done
   flag and removes the envelope. API, SSH and persistence failures keep retry
-  state and leave the services enabled. Restart `xoa-credentials.service` to
+  state and leave the services enabled. Sign-ins respect XO 5.113.2's per-user
+  authentication throttle, including the final verification. Transient API and
+  connection failures get up to three fresh sessions with bounded backoff; the
+  helper has a 120-second overall deadline. Restart `xoa-credentials.service` to
   retry after repairing the failure. Subsequent XO changes have approximately
   a one-second crash-loss window under Redis's every-second fsync policy;
   a normal shutdown remains preferable.
@@ -124,3 +127,21 @@ as the restored administrator, compare the full user list with the export,
 remove unexpected accounts or assign unique new passwords to intentionally
 retained accounts, and verify that old credentials fail. Persist the corrected
 state before reconnecting production resources.
+
+### Diagnosing first-boot failures
+
+New images require a complete administrator email/password from XO Lite. A
+manual XVA import without provisioning data deliberately fails closed; it is
+not silently marked complete with the default account. Missing, incomplete or
+malformed credentials stop phase 1 before networking and before guest key
+cleanup. Use XO Lite deployment with valid credentials for these images.
+
+If XO Lite reports "XOA not responding" and no IP appears, inspect
+`systemctl status xoa-first-boot.service` and `/var/log/xoa-first-boot.log`
+from the VM console (using the build-configured console credentials). Repair the
+provisioning data on the host before rebooting; do not bypass the NetworkManager
+dependency or remove credential keys before successful capture. After phase 1
+succeeds, a phase-2 failure is diagnosed with
+`systemctl status xoa-credentials.service`. Keep the root-only retry envelope
+and restart that service after correcting the cause. Never paste its contents
+into logs or reports.

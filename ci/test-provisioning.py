@@ -113,6 +113,20 @@ echo "remove $*" >> "$EVENTS"''')
         self.assertEqual(self.run_script('xoa-first-boot.sh').returncode, 0)
         self.assertEqual(self.envelope.read_bytes(), original)
 
+    def test_reader_rejects_absent_partial_and_malformed_admin_before_network(self):
+        self.envelope.unlink()
+        self.stub('rpm', 'echo guest-utilities-test')
+        self.stub('lsmod', 'exit 0')
+        self.stub('xenstore-rm', 'echo unexpected-cleanup >> "$EVENTS"')
+        for admin in ['', '{', '{}', '{"email":"lab@example.test"}', '{"password":"false"}']:
+            with self.subTest(admin=admin):
+                self.stub('xenstore-read', f"case \"$1\" in domid) echo 8;; */admin-account) printf '%s\\n' '{admin}';; *) exit 1;; esac")
+                result = self.run_script('xoa-first-boot.sh')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.envelope.exists())
+                self.assertFalse((self.root / 'etc/NetworkManager/system-connections/xoa-provisioned.nmconnection').exists())
+                self.assertFalse(self.events.exists())
+
     def test_finalizer_stops_services_and_removes_database(self):
         redis = self.root / 'var/lib/redis'
         redis.mkdir()

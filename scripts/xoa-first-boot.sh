@@ -135,6 +135,7 @@ ERRORS=0
 [ -z "$XOA_EMAIL" ]          && echo "[$(date '+%H:%M:%S')] FAIL: xoa email empty"             && ERRORS=$((ERRORS+1))
 [ -z "$XOA_PASSWORD" ]       && echo "[$(date '+%H:%M:%S')] FAIL: xoa password empty"          && ERRORS=$((ERRORS+1))
 # SSH_PASSWORD may be empty when SSH is disabled in XO Lite.
+[ "$ERRORS" -eq 0 ] || { echo 'Missing administrator credentials; refusing to start networking'; exit 1; }
 [ "$ERRORS" -eq 0 ]          && echo "[$(date '+%H:%M:%S')] PASS: all expected keys present ($ERRORS errors)"
 
 # --- 6. Apply custom NTP servers ---
