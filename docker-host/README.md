@@ -59,7 +59,9 @@ The helper also reports whole-guest resource usage and bounded log snapshots.
 The installed guest is password-locked. XOA-HL supplies a per-guest SSH host key
 and a restricted management key when it deploys the template. For recovery,
 retain XO backups of both XOA-HL's private management state and the Docker guest.
-Guest OS/Docker patching is a separate maintenance action. This PR supplies
+An optional deployment public key enables a separate `docker-admin` sudo account
+for guest OS/Docker maintenance. Without it, interactive access requires offline
+console rescue. Guest OS/Docker patching is a separate maintenance action. This PR supplies
 source and CI paths; a successful XVA build, first-boot deployment and the full
 [appliance acceptance checklist](https://github.com/Vagrantin/xoa-hl/blob/vibe/container-support-27a085/docs/containers.md#validation-before-release)
 are required before declaring the feature shipped.

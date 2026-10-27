@@ -7,7 +7,7 @@ if rpm -q xoa-hl >/dev/null 2>&1 || test -f /etc/xensource-inventory; then
     echo "Refusing to install Docker on the management appliance or Dom0" >&2
     exit 1
 fi
-dnf -y install dnf-plugins-core cloud-init openssh-server python3
+dnf -y install dnf-plugins-core cloud-init openssh-server python3 sudo
 # Stable vendor repository; RPM signatures checked by dnf.
 dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 dnf -y --disablerepo='docker-ce-test*' --disablerepo='docker-ce-nightly*' install docker-ce docker-ce-cli containerd.io
