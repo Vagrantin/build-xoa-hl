@@ -19,6 +19,7 @@ echo "=========================================================="
 # 1. Load external config
 if [ -f "$CONFIG_FILE" ]; then
     echo "---> Found external configuration: loading $CONFIG_FILE..."
+    # shellcheck source=/dev/null # the operator's build.config, not in the repo
     source "./$CONFIG_FILE"
 else
     echo "---> No external '$CONFIG_FILE' found. Proceeding with fallback defaults."
@@ -30,7 +31,7 @@ XCPNG_IP="${XCPNG_IP:-192.168.1.10}"
 XCPNG_USER="${XCPNG_USER:-root}"
 XCPNG_PASSWORD="${XCPNG_PASSWORD:-YOUR_XCPNG_PASSWORD}"
 VM_NETWORK_NAME="${VM_NETWORK_NAME:-Pool-wide network associated with eth0}"
-VM_NAME="${VM_NAME:-xoa-almalinux}"
+VM_NAME="${VM_NAME:-XOA-hl}"
 ALMALINUX_ROOT_PASSWORD="${ALMALINUX_ROOT_PASSWORD:-YOUR_SECURE_VM_PASSWORD}"
 
 # AlmaLinux version - Latest LTS (AlmaLinux 9)
@@ -284,7 +285,7 @@ cat > almalinux-build.json << PACKEREOF
       "ssh_password": "$ALMALINUX_ROOT_PASSWORD",
       "ssh_timeout": "30m",
       "format": "xva_compressed",
-      "keep_vm": "always",
+      "keep_vm": "never",
       "skip_set_template": "true"
     }
   ],
@@ -323,6 +324,15 @@ cat > almalinux-build.json << PACKEREOF
         "curl -fsSL '${XOA_HL_RPM_URL}' -o /tmp/xoa-hl.rpm",
         "dnf install -y /tmp/xoa-hl.rpm",
         "rm -f /tmp/xoa-hl.rpm"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Stamping the appliance release...'",
+        "rel=\$(rpm -q --qf '%{RELEASE}' xoa-hl); sha=\$(echo \$rel | cut -d. -f2)",
+        "echo \"built $(date -u +%F), commit \${sha#g}, release ${XOA_HL_TAG}\" > /etc/xoa-hl-vm-release",
+        "cat /etc/xoa-hl-vm-release"
       ]
     },
     {
@@ -382,6 +392,16 @@ cat > almalinux-build.json << PACKEREOF
       "inline": [
         "echo '==> Stripping unique system identity...'",
         "echo -n > /etc/machine-id"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Security: Burning root password and locking account...'",
+        "openssl rand -base64 32 | chpasswd -e",
+        "passwd -l root",
+        "sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config",
+        "systemctl restart sshd"
       ]
     }
   ]

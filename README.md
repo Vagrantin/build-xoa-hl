@@ -12,7 +12,7 @@ Packer-based pipeline that builds the **XOA Home-laber Edition VM appliance** (A
 │   ├── setup-xoa-builder.sh   # Runs on the build machine: loads build.config, generates
 │   │                          # the Kickstart (inst.ks) and Packer JSON, launches the build
 │   ├── xoa-first-boot.sh      # In-VM: reads XO Lite xenstore provisioning data on first boot
-│   └── xoa-credentials.sh     # In-VM phase 2: sets XO admin credentials via xo-cli, then
+│   └── xoa-credentials.sh     # In-VM phase 2: sets XO admin credentials (JSON-RPC), then
 │                              # disables itself (falls back to admin@admin.net / admin)
 ├── systemd/
 │   ├── xoa-first-boot.service
@@ -54,7 +54,7 @@ for local runs.
 ## Releases
 
 The XVA appliance is published as a **GitHub Release on this repository**,
-tagged `xoa-image-<date>-<sha7>` with the `xoa-almalinux.xva` asset. `<sha7>` is
+tagged `xoa-image-<date>-<sha7>` with the `XOA-hl.xva` asset. `<sha7>` is
 the `../xoa-hl` commit the image was built from. Releases are created by the
 orchestrator's `xoa-vm-agent` (see
 [`xcp-orchestrator`](https://github.com/Vagrantin/buildorchestration/tree/main/xcp-orchestrator)),
@@ -65,6 +65,13 @@ Images used to be published on the `xoa-hl` repo
 before that switch are [still
 there](https://github.com/Vagrantin/xoa-hl/releases) so already-shipped ISOs
 keep resolving them.
+
+## Release stamp
+
+The image carries `/etc/xoa-hl-vm-release`, one readable line such as
+`built 2026-10-08, commit abc1234, release v5.113.2_e281c536-ce1`: the build
+date, the xoa-hl commit and the xoa-hl release tag the image was built from.
+The XOA-HL About page shows it as the VM version.
 
 ## Related
 

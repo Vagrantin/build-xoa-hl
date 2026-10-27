@@ -24,7 +24,7 @@ if ! command -v xenstore-read &>/dev/null; then
     exit 1
 fi
 echo "[$(date '+%H:%M:%S')] xenstore-read binary : $(command -v xenstore-read)"
-echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(rpm -q xe-guest-utilities 2>/dev/null | echo 'not found via rpm')"
+echo "[$(date '+%H:%M:%S')] xe-guest-utilities   : $(rpm -q xe-guest-utilities 2>/dev/null || echo 'not found via rpm')"
 
 # Check xenbus device node
 if [ -e /dev/xen/xenbus ]; then
@@ -97,7 +97,8 @@ IP=$(xs_read "ip")
 NETMASK=$(xs_read "netmask")
 GATEWAY=$(xs_read "gateway")
 DNS=$(xs_read "dns")
-NTP=$(xs_read "ntp-servers")
+# XO Lite Deploy XOA writes custom NTP servers to vm-data/ntp, space separated
+NTP=$(xs_read "ntp")
 SSH_PASSWORD=$(xs_read "system-account-xoa-password")
 
 # JSON blob key
@@ -149,6 +150,38 @@ ERRORS=0
 chmod 600 /etc/xoa-first-boot.env
 
 echo "[$(date '+%H:%M:%S')] env file written : /etc/xoa-first-boot.env ($(wc -l < /etc/xoa-first-boot.env) lines)"
+
+# --- 6. Apply custom NTP servers ---
+# The unit is ordered Before=chronyd.service, so chronyd reads this file once it is written (xcp-hl#156).
+echo ""
+echo "[$(date '+%H:%M:%S')] [6/7] Applying custom NTP servers..."
+
+CHRONY_CONF="/etc/chrony.conf"
+NTP_SERVERS=()
+read -ra NTP_TOKENS <<< "$NTP"
+for NTP_SERVER in "${NTP_TOKENS[@]}"; do
+    if [[ "$NTP_SERVER" =~ ^[A-Za-z0-9.:-]+$ ]]; then
+        NTP_SERVERS+=("$NTP_SERVER")
+    else
+        echo "[$(date '+%H:%M:%S')] WARNING: ignoring invalid NTP server '$NTP_SERVER'"
+    fi
+done
+
+if [ ${#NTP_SERVERS[@]} -eq 0 ]; then
+    echo "[$(date '+%H:%M:%S')] No custom NTP server → keeping image defaults"
+elif [ ! -f "$CHRONY_CONF" ]; then
+    echo "[$(date '+%H:%M:%S')] ERROR: $CHRONY_CONF not found, NTP servers not applied"
+else
+    # Replace the image's time sources with the user's ones
+    sed -i -E 's/^(pool|server)[[:space:]]/# &/' "$CHRONY_CONF"
+    {
+        echo "# Custom NTP servers from XO Lite Deploy XOA (vm-data/ntp)"
+        for NTP_SERVER in "${NTP_SERVERS[@]}"; do
+            echo "server $NTP_SERVER iburst"
+        done
+    } >> "$CHRONY_CONF"
+    echo "[$(date '+%H:%M:%S')] NTP servers applied to $CHRONY_CONF : ${NTP_SERVERS[*]}"
+fi
 
 # --- 7. Write NetworkManager keyfile ---
 echo ""

@@ -1,1 +1,7 @@
 artefact/
+/ci-results
+
+docker-host/packer.json
+docker-host/http/
+docker-host/output/
+__pycache__/
