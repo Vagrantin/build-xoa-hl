@@ -79,9 +79,17 @@ The XOA-HL About page shows it as the VM version.
 
 ## Provisioning security (#310 / #311)
 
-Applies to images built with this change, not the previously released ce47
-image `xoa-image-20261027-ca44911`. An application RPM update does not replace
-the image's provisioning scripts or migrate its Redis configuration.
+Applies to the image rebuilt on 2026-10-27 from `build-xoa-hl@fa0c987`:
+`qa-xoa-build-59.xva` in release `xoa-image-20261027-ca44911`, SHA-256
+`cc20b9398d5ab0dc03eae6706d3b54236e2d245fa1d0dd1232d59836387057aa`.
+The removed `qa-xoa-build-58.xva` used the same tag and About version strings
+but did not contain the fix. An application RPM update does not replace the
+image's provisioning scripts or migrate its Redis configuration.
+
+Inside the appliance as root, `redis-cli config get appendonly` returns
+`appendonly` followed by `yes` on the rebuilt image, versus `no` on the previous
+image. This follows `scripts/xoa-finalize-state.sh@fa0c987`. A manually changed
+or custom image can also return `yes`; retain the asset name and checksum.
 
 - Phase 1 never dumps XenStore. It finishes network configuration and writes a
   root-only, base64-encoded envelope via atomic rename and filesystem sync
@@ -89,13 +97,17 @@ the image's provisioning scripts or migrate its Redis configuration.
   A retry keeps the existing envelope even after XO Lite has cleared XAPI.
   NetworkManager requires successful phase-1 capture before starting, so an
   early capture failure cannot publish the IP that triggers XAPI cleanup.
-- XO Lite must complete deployment with the companion cleanup fix in
-  `Vagrantin/xolite-ce`: remove `vm-data/admin-account`,
-  `vm-data/system-account-xoa-password` and `vm-data/xoa-updater-credentials`
-  from the persistent XAPI map. Guest `xenstore-rm` alone is insufficient.
-  Keep the deployment tab open until completion; an interrupted/abandoned
-  deployment requires host-side cleanup. Existing metadata backups, exports
-  and old first-boot logs can contain secrets and require credential rotation.
+- On the rebuilt image, guest cleanup also removed `vm-data/admin-account`
+  and `vm-data/system-account-xoa-password` from XAPI's persistent map after
+  first boot. This was observed on one XCP-HL v8.3 host, as recorded in
+  [xcp-hl#311](https://github.com/Vagrantin/xcp-hl/issues/311#issuecomment-6439980771).
+  Do not assume that guest `xenstore-rm` has the same effect for older images,
+  Vates, Ronivay, custom images, or failed or abandoned deployments. Keep the
+  XO Lite deployment tab open until completion. After credentials are applied,
+  check for remaining keys on the host and remove them if present, including
+  `vm-data/xoa-updater-credentials`. The companion `Vagrantin/xolite-ce` cleanup
+  fix covers other image sources too. Existing metadata backups, exports and
+  old first-boot logs can contain secrets and require credential rotation.
 - Finalization stops XO and Redis, removes all build-time database state from
   the fresh build VM, and enables AOF with `appendfsync everysec`. It must
   never run on an existing installation. The image does not carry the build's
