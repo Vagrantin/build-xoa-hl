@@ -47,7 +47,7 @@ systemctl enable sshd
         'disk_size': 32768, 'vm_memory': 2048, 'network_names': [env['VM_NETWORK_NAME']],
         'http_directory': 'docker-host/http', 'boot_wait': '10s',
         'boot_command': ['<wait10>', '<esc><wait2>', '<esc><wait2>', 'linux inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/inst.ks inst.text<enter>'],
-        'shutdown_command': 'passwd -l root; shutdown -P now', 'shutdown_timeout': '5m',
+        'shutdown_command': 'passwd -l root; shutdown -P now',
         'ssh_username': 'root', 'ssh_password': password, 'ssh_timeout': '30m',
         'format': 'xva_compressed', 'keep_vm': 'never', 'skip_set_template': False,
         'output_directory': 'docker-host/output',
