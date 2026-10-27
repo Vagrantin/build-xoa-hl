@@ -1,0 +1,73 @@
+name: Dedicated Docker host template
+on:
+  pull_request:
+    paths: ['docker-host/**', 'scripts/install-docker.sh', 'tests/test-docker-host.py', '.github/workflows/docker-host.yml']
+  workflow_dispatch:
+    inputs:
+      build_image:
+        description: Build a draft Docker XVA on the dedicated CI runner
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/test-docker-host.py
+      - run: bash -n scripts/install-docker.sh
+      - name: Docker protocol integration on a disposable CI container
+        run: |
+          docker build -t xoa-docker-protocol -f docker-host/Containerfile .
+          docker run --rm --privileged xoa-docker-protocol
+      - name: Validate generated Packer configuration with the actual pinned plugin
+        env:
+          XCPNG_IP: '192.0.2.1'
+          XCPNG_USER: root
+          XCPNG_PASSWORD: validation-only
+          VM_NETWORK_NAME: validation-network
+          SR_NAME: validation-storage
+          ALMALINUX_ISO_URL: https://example.invalid/almalinux-9.iso
+          ALMALINUX_ISO_CHECKSUM: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          DOCKER_BUILD_PASSWORD: validationOnlyPassword123456789
+        run: |
+          python3 docker-host/generate-packer.py
+          docker build -t xoa-docker-packer -f docker-host/Packer.Containerfile .
+          docker run --rm -v "$PWD:/work" -w /work xoa-docker-packer validate docker-host/packer.json
+  image:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_image
+    needs: protocol
+    # Dedicated, disposable CI runner with network access to a QA XCP-ng host.
+    runs-on: [self-hosted, xcp-hl-docker-builder]
+    timeout-minutes: 90
+    env:
+      XCPNG_IP: ${{ secrets.DOCKER_BUILD_XCPNG_IP }}
+      XCPNG_USER: ${{ secrets.DOCKER_BUILD_XCPNG_USER }}
+      XCPNG_PASSWORD: ${{ secrets.DOCKER_BUILD_XCPNG_PASSWORD }}
+      VM_NETWORK_NAME: ${{ vars.DOCKER_BUILD_NETWORK }}
+      SR_NAME: ${{ vars.DOCKER_BUILD_SR }}
+      ALMALINUX_ISO_URL: ${{ vars.DOCKER_BUILD_ISO_URL }}
+      ALMALINUX_ISO_CHECKSUM: ${{ vars.DOCKER_BUILD_ISO_CHECKSUM }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker guest XVA without publishing a release
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_BUILD_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$DOCKER_BUILD_PASSWORD"
+          python3 docker-host/generate-packer.py
+          # Packer + the pinned plugin run in Docker; no workstation workflow.
+          docker build -t xoa-docker-packer -f docker-host/Packer.Containerfile .
+          docker run --rm --network host -v "$PWD:/work" -w /work xoa-docker-packer validate docker-host/packer.json
+          docker run --rm --network host -v "$PWD:/work" -w /work xoa-docker-packer build docker-host/packer.json
+      - name: Remove generated credentials
+        if: always()
+        run: rm -f docker-host/packer.json docker-host/http/inst.ks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-host-v1-xva
+          path: docker-host/output/**
+          if-no-files-found: error
+          retention-days: 7

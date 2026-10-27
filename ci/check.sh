@@ -20,5 +20,8 @@ for u in systemd/*.service; do
   grep -q '^\[Service\]' "$u" || { echo "$u has no [Service] section" >&2; exit 1; }
 done
 
+step "Docker host protocol and builder contracts"
+python3 tests/test-docker-host.py
+
 rm -f "$OUT/current-step"
 echo "all checks passed"
