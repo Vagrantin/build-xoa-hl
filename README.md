@@ -87,6 +87,8 @@ the image's provisioning scripts or migrate its Redis configuration.
   root-only, base64-encoded envelope via atomic rename and filesystem sync
   before removing live guest credential keys. Base64 is encoding, not encryption.
   A retry keeps the existing envelope even after XO Lite has cleared XAPI.
+  NetworkManager requires successful phase-1 capture before starting, so an
+  early capture failure cannot publish the IP that triggers XAPI cleanup.
 - XO Lite must complete deployment with the companion cleanup fix in
   `Vagrantin/xolite-ce`: remove `vm-data/admin-account`,
   `vm-data/system-account-xoa-password` and `vm-data/xoa-updater-credentials`

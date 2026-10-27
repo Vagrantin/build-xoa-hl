@@ -12,6 +12,11 @@ fi
 # Strip active duplicates, then make these authoritative on every boot.
 sed -i -E '/^[[:space:]]*(appendonly|appendfsync)[[:space:]]/d' "$conf"
 printf '\n# XOA-HL crash durability (xcp-hl#311)\nappendonly yes\nappendfsync everysec\n' >> "$conf"
+# An IP address is XO Lite's signal to clear XAPI provisioning keys. Do not
+# bring up networking if phase 1 failed to durably capture those credentials.
+mkdir -p /etc/systemd/system/NetworkManager.service.d
+printf '[Unit]\nRequires=xoa-first-boot.service\nAfter=xoa-first-boot.service\n' \
+    > /etc/systemd/system/NetworkManager.service.d/xoa-provisioning.conf
 # This is a fresh, disposable build VM, never an upgrade/migration operation.
 # Refuse unexpected storage locations rather than exporting a stale database.
 dir=$(awk '$1 == "dir" { gsub(/"/, "", $2); print $2 }' "$conf")

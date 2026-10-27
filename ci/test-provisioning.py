@@ -127,6 +127,9 @@ echo "remove $*" >> "$EVENTS"''')
         self.assertIn('appendonly yes\nappendfsync everysec', (self.root / 'etc/redis.conf').read_text())
         self.assertFalse(self.envelope.exists())
         self.assertEqual(self.events.read_text().splitlines(), ['systemctl stop xo-server.service', 'systemctl stop redis.service'])
+        network = (self.root / 'etc/systemd/system/NetworkManager.service.d/xoa-provisioning.conf').read_text()
+        self.assertIn('Requires=xoa-first-boot.service', network)
+        self.assertIn('After=xoa-first-boot.service', network)
 
 
 if __name__ == '__main__':
