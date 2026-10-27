@@ -20,5 +20,9 @@ for u in systemd/*.service; do
   grep -q '^\[Service\]' "$u" || { echo "$u has no [Service] section" >&2; exit 1; }
 done
 
+step "provisioning failure paths and credential retries"
+python3 ci/test-provisioning.py -v
+node ci/test-credentials.mjs
+
 rm -f "$OUT/current-step"
 echo "all checks passed"

@@ -13,7 +13,7 @@ Packer-based pipeline that builds the **XOA Home-laber Edition VM appliance** (A
 │   │                          # the Kickstart (inst.ks) and Packer JSON, launches the build
 │   ├── xoa-first-boot.sh      # In-VM: reads XO Lite xenstore provisioning data on first boot
 │   └── xoa-credentials.sh     # In-VM phase 2: sets XO admin credentials (JSON-RPC), then
-│                              # disables itself (falls back to admin@admin.net / admin)
+│                              # disables itself only after durable success
 ├── systemd/
 │   ├── xoa-first-boot.service
 │   └── xoa-credentials.service
@@ -21,11 +21,9 @@ Packer-based pipeline that builds the **XOA Home-laber Edition VM appliance** (A
 └── artefact/             # Build/debug artefacts: logs, installed-RPM list, preseed, memo
 ```
 
-## Usage
+## Build and provisioning
 
-1. Copy `build.config.sample` to `build.config` and fill in your XCP-ng host IP/credentials, network name, and passwords.
-2. Run `scripts/setup-xoa-builder.sh` from the build machine (developed on Linux Mint).
-3. Packer installs AlmaLinux via Kickstart, provisions xe-guest-utilities, and installs the first-boot systemd units so the resulting appliance self-configures (xenstore data, then admin credentials) when deployed through XO Lite.
+Builds run through the CI `build/xoa-vm-agent` pipeline. Its setup script generates the Packer configuration; it is not a workstation build workflow. Packer installs AlmaLinux, guest utilities and the two first-boot services. Keep build credentials in the CI configuration, outside the repository.
 
 ⚠️ `build.config` contains plaintext credentials, never commit it.
 
@@ -49,7 +47,7 @@ guesses the filename:
 `XOA_HL_REPO` (default `Vagrantin/xoa-hl`) selects the source repository.
 
 Pin `XOA_HL_TAG` for reproducible images, the unpinned path is a convenience
-for local runs.
+for unpinned CI builds.
 
 ## Releases
 
@@ -78,3 +76,49 @@ The XOA-HL About page shows it as the VM version.
 - `../xoa-hl`, builds the patched Xen Orchestra that runs inside this VM.
 - `../xolite-ce`, the XO Lite build that deploys this image.
 - `../xoa-proxy`, HTTPS/gzip bridge used during image deployment.
+
+## Provisioning security (#310 / #311)
+
+Applies to images built with this change, not the previously released ce47
+image `xoa-image-20261027-ca44911`. An application RPM update does not replace
+the image's provisioning scripts or migrate its Redis configuration.
+
+- Phase 1 never dumps XenStore. It finishes network configuration and writes a
+  root-only, base64-encoded envelope via atomic rename and filesystem sync
+  before removing live guest credential keys. Base64 is encoding, not encryption.
+  A retry keeps the existing envelope even after XO Lite has cleared XAPI.
+- XO Lite must complete deployment with the companion cleanup fix in
+  `Vagrantin/xolite-ce`: remove `vm-data/admin-account`,
+  `vm-data/system-account-xoa-password` and `vm-data/xoa-updater-credentials`
+  from the persistent XAPI map. Guest `xenstore-rm` alone is insufficient.
+  Keep the deployment tab open until completion; an interrupted/abandoned
+  deployment requires host-side cleanup. Existing metadata backups, exports
+  and old first-boot logs can contain secrets and require credential rotation.
+- Finalization stops XO and Redis, removes all build-time database state from
+  the fresh build VM, and enables AOF with `appendfsync everysec`. It must
+  never run on an existing installation. The image does not carry the build's
+  default administrator database.
+- Phase 2 requires AOF, uses `appendfsync always` during credential mutation,
+  updates the original default user, verifies a fresh login, checks `SAVE`,
+  restores `everysec`, syncs the filesystem, and only then writes/syncs the done
+  flag and removes the envelope. API, SSH and persistence failures keep retry
+  state and leave the services enabled. Restart `xoa-credentials.service` to
+  retry after repairing the failure. Subsequent XO changes have approximately
+  a one-second crash-loss window under Redis's every-second fsync policy;
+  a normal shutdown remains preferable.
+
+Before accepting a rebuilt image, record its tag and RPM release and verify on
+an isolated appliance: both enabled/disabled SSH deployments, boolean-looking
+passwords, absence of credential keys in live XenStore and XAPI, no secrets in
+logs, exactly the intended administrator, and rejection of the old default
+password. Force-stop immediately after provisioning, boot and verify the same
+account; repeat after changing its password and allowing the AOF fsync interval.
+Test API/SAVE failure and reboot retry. Use halted snapshots for lab baselines.
+The automated tests exercise injected failure paths, API state transitions and
+real Redis AOF replay after SIGKILL; they do not replace deployed acceptance.
+
+Configuration import can retain destination-only users: after recovery sign in
+as the restored administrator, compare the full user list with the export,
+remove unexpected accounts or assign unique new passwords to intentionally
+retained accounts, and verify that old credentials fail. Persist the corrected
+state before reconnecting production resources.

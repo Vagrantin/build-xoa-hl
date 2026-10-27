@@ -347,6 +347,16 @@ cat > almalinux-build.json << PACKEREOF
     },
     {
       "type": "file",
+      "source": "scripts/xoa-apply-credentials.mjs",
+      "destination": "/root/xoa-apply-credentials.mjs"
+    },
+    {
+      "type": "file",
+      "source": "scripts/xoa-finalize-state.sh",
+      "destination": "/root/xoa-finalize-state.sh"
+    },
+    {
+      "type": "file",
       "source": "systemd/xoa-first-boot.service",
       "destination": "/etc/systemd/system/xoa-first-boot.service"
     },
@@ -392,6 +402,13 @@ cat > almalinux-build.json << PACKEREOF
       "inline": [
         "echo '==> Stripping unique system identity...'",
         "echo -n > /etc/machine-id"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "echo '==> Removing build-time XO state and enabling Redis AOF...'",
+        "bash /root/xoa-finalize-state.sh"
       ]
     },
     {
