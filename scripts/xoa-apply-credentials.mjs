@@ -42,7 +42,7 @@ export async function applyCredentials(call, email, password, timing = { now: Da
 export async function retryProvisioning(run, wait = sleep) {
   for (let attempt = 0; ; attempt++) {
     try { return await run() } catch {
-      if (attempt === 2) throw Error('Credential API failed')
+      if (attempt === 4) throw Error('Credential API failed')
       await wait(3000 * (attempt + 1))
     }
   }
@@ -53,9 +53,12 @@ export function credentialSession(email, password, Socket = WebSocket, timing) {
     const ws = new Socket('wss://127.0.0.1/api/')
     const pending = new Map()
     let id = 0, settled = false
+    // XO accepts the socket before its API answers; a silent attempt must be retried.
+    const limit = setTimeout(() => finish(true), timing?.attemptMs ?? 10000)
     const finish = error => {
       if (settled) return
       settled = true
+      clearTimeout(limit)
       for (const waiter of pending.values()) waiter.reject(Error('Credential connection closed'))
       pending.clear()
       ws.close()
@@ -85,7 +88,7 @@ export function credentialSession(email, password, Socket = WebSocket, timing) {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const timeout = setTimeout(() => { console.error('Credential API timed out'); process.exit(1) }, 120000)
+  const timeout = setTimeout(() => { console.error('Credential API timed out'); process.exit(1) }, 150000)
   try {
     await retryProvisioning(() => credentialSession(process.env.XOA_EMAIL, process.env.XOA_PASSWORD))
     clearTimeout(timeout)

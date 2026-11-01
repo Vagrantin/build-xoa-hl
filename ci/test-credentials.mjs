@@ -106,5 +106,23 @@ for (const disconnectAt of ['open', 'api-startup', 'user.changePassword', 'user.
 const unavailable = []
 await assert.rejects(retryProvisioning(async () => { unavailable.push('connect'); throw Error('offline') },
   async ms => unavailable.push(ms)), /Credential API failed/)
-assert.deepEqual(unavailable, ['connect', 3000, 'connect', 6000, 'connect'])
-console.log('Transient startup, disconnects after mutations, and bounded failure retries passed')
+assert.deepEqual(unavailable, ['connect', 3000, 'connect', 6000, 'connect', 9000, 'connect', 12000, 'connect'])
+// A socket that opens but never answers must time out and be retried.
+{
+  const a = api()
+  let connections = 0
+  class Socket {
+    constructor() { connections++; queueMicrotask(() => this.onopen()) }
+    send(raw) {
+      const message = JSON.parse(raw)
+      if (connections === 1) return
+      a.call(message.method, message.params).then(result => this.onmessage({ data: JSON.stringify({ id: message.id, result }) }),
+        () => this.onmessage({ data: JSON.stringify({ id: message.id, error: {} }) }))
+    }
+    close() {}
+  }
+  await retryProvisioning(() => credentialSession('lab@example.test', 'false', Socket, { ...a.timing, attemptMs: 20 }), async () => {})
+  assert.equal(connections, 2)
+  assert.equal(a.user.email, 'lab@example.test')
+}
+console.log('Transient startup, silent API, disconnects after mutations, and bounded failure retries passed')
