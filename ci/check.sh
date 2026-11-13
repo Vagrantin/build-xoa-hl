@@ -24,5 +24,8 @@ step "provisioning failure paths and credential retries"
 python3 ci/test-provisioning.py -v
 node ci/test-credentials.mjs
 
+step "Docker host protocol and builder contracts"
+python3 tests/test-docker-host.py
+
 rm -f "$OUT/current-step"
 echo "all checks passed"

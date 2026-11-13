@@ -1,0 +1,5 @@
+FROM docker:27-dind
+RUN apk add --no-cache python3
+COPY docker-host/command.py /usr/local/libexec/xoa-hl-docker-command
+COPY tests/docker-protocol-smoke.sh /test.sh
+ENTRYPOINT ["sh", "/test.sh"]
