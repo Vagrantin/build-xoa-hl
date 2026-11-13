@@ -12,8 +12,30 @@ loader = importlib.machinery.SourceFileLoader('command', '/usr/local/libexec/xoa
 spec = importlib.util.spec_from_loader(loader.name, loader)
 m = importlib.util.module_from_spec(spec); loader.exec_module(m)
 def call(operation, **params): return m.handle(dict(version=1, operation=operation, **params))
+import time
 cid = call('create', config={'name':'smoke', 'image':'busybox:1.37', 'cpus':.1, 'memoryMiB':16, 'restart':'no'})['id']
-call('overview')
+state = call('overview')
+assert state['limits'][cid] == {'cpus': .1, 'memoryMiB': 16}, state['limits']
+assert 'stats' not in call('summary')
+# An image that is not local is downloaded by a detached worker, then created.
+task = call('create', config={'name':'later', 'image':'busybox:1.36', 'cpus':.1, 'memoryMiB':16, 'restart':'no'})['task']
+for _ in range(120):
+    state = call('overview')
+    if not state['tasks']: break
+    time.sleep(1)
+assert not state['tasks'], state['tasks']
+later = [c['ID'] for c in state['containers'] if c['Names'] == 'later']
+assert len(later) == 1, state['containers']
+call('remove', id=later[0])
+# A download that cannot succeed is reported, creates nothing, and can be dismissed.
+task = call('pull', image='registry.invalid/none:1')['task']
+for _ in range(120):
+    failed = [t for t in call('overview')['tasks'] if t['state'] == 'failed']
+    if failed: break
+    time.sleep(1)
+assert failed and failed[0]['id'] == task, call('overview')['tasks']
+call('dismiss', id=task)
+assert call('overview')['tasks'] == []
 call('logs', id=cid)
 call('start', id=cid)
 call('stop', id=cid)

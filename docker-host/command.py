@@ -7,12 +7,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 LABEL = 'net.xcp-hl.managed=1'
 NAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$')
 IMAGE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$')
 ID = re.compile(r'^[a-f0-9]{12,64}$')
+TASK = re.compile(r'^[a-f0-9]{16}$')
+# Background downloads; tmpfs, so a guest reboot clears them.
+TASKS = Path('/run/xoa-hl-docker/tasks')
 
 
 def require(ok, message):
@@ -30,6 +34,12 @@ def docker(*args, timeout=30):
         data = output.read(4 * 1024 * 1024 + 1)
         require(len(data) <= 4 * 1024 * 1024, 'Docker response too large')
         return data.decode('utf-8', errors='replace')
+
+
+def present(kind, name):
+    # Existence probe; Docker prints nothing we keep.
+    return subprocess.run(['/usr/bin/docker', kind, 'inspect', name], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, timeout=30).returncode == 0
 
 
 def limit_output():
@@ -53,7 +63,7 @@ def number(value, low, high, title):
     return value
 
 
-def create(config):
+def run_arguments(config):
     require(isinstance(config, dict), 'Invalid configuration')
     require(not set(config) - {'name', 'image', 'cpus', 'memoryMiB', 'ports', 'volumes', 'environment', 'restart'}, 'Unknown configuration option')
     require(isinstance(config.get('name'), str) and NAME.fullmatch(config['name']), 'Invalid name')
@@ -88,26 +98,106 @@ def create(config):
     for key, value in environment.items():
         require(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', key) and isinstance(value, str) and len(value) <= 4096 and '\0' not in value, 'Invalid environment variable')
         args += ['--env', key + '=' + value]
-    # Pull explicitly through the UI first. Failed pulls never leave half-created containers.
-    docker('image', 'inspect', config['image'])
-    return {'id': docker(*args, config['image'], timeout=60).strip()}
+    return args
+
+
+def create(config):
+    args = run_arguments(config)
+    require(not present('container', config['name']), 'A container with this name already exists')
+    if present('image', config['image']):
+        return {'id': docker(*args, config['image'], timeout=60).strip()}
+    # Missing image: download in the background, then create. Nothing is created if the download fails.
+    return start_task('create', config['image'], config['name'], args)
+
+
+def write_task(tid, task):
+    TASKS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = TASKS / (tid + '.tmp')
+    temporary.write_text(json.dumps(task))
+    temporary.replace(TASKS / (tid + '.json'))
+
+
+def read_tasks():
+    tasks = []
+    for path in sorted(TASKS.glob('*.json')) if TASKS.is_dir() else []:
+        try:
+            task = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if task['state'] == 'running' and not Path('/proc', str(task['pid'])).exists():
+            task.update(state='failed', error='Download interrupted; retry')
+            write_task(path.stem, task)
+        if task['state'] == 'failed' and time.time() - task['started'] > 86400:
+            path.unlink(missing_ok=True)
+            continue
+        tasks.append({key: task[key] for key in ('id', 'kind', 'image', 'name', 'state', 'error', 'started')})
+    return tasks
+
+
+def start_task(kind, image, name='', args=None):
+    running = [task for task in read_tasks() if task['state'] == 'running']
+    require(len(running) < 4, 'Too many downloads in progress; wait and retry')
+    require(not any(task['image'] == image and task['name'] == name for task in running), 'This download is already in progress')
+    tid = os.urandom(8).hex()
+    # Detached worker outlives the SSH session; its input never touches disk.
+    worker = subprocess.Popen([sys.executable, os.path.abspath(__file__), '--task', tid], stdin=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    write_task(tid, {'id': tid, 'kind': kind, 'image': image, 'name': name, 'state': 'running', 'error': '',
+                     'started': int(time.time()), 'pid': worker.pid})
+    worker.stdin.write(json.dumps({'image': image, 'args': args}).encode())
+    worker.stdin.close()
+    return {'task': tid}
+
+
+def run_task(tid):
+    require(TASK.fullmatch(tid), 'Invalid task')
+    request = json.loads(sys.stdin.buffer.read(1048577))
+    path = TASKS / (tid + '.json')
+    task = json.loads(path.read_text())
+    error = 'Image download failed; check the image name, registry access and free disk space'
+    try:
+        docker('pull', '--quiet', request['image'], timeout=3600)
+        if request['args']:
+            error = 'Image downloaded, but the container did not start; check its name and published ports'
+            docker(*request['args'], request['image'], timeout=60)
+        path.unlink()
+    except (ValueError, OSError, subprocess.SubprocessError):
+        task.update(state='failed', error=error)
+        write_task(tid, task)
+
+
+def host_state(with_stats):
+    info = json.loads(docker('info', '--format', '{{json .}}'))
+    containers = lines(docker('ps', '--all', '--no-trunc', '--filter', 'label=' + LABEL, '--format', '{{json .}}'))
+    running = [c['ID'] for c in containers if c['State'] == 'running']
+    limits = {}
+    if containers:
+        rows = docker('inspect', '--format', '{{.Id}} {{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}', *[c['ID'] for c in containers])
+        for cid, cpus, memory in (row.split() for row in rows.splitlines() if row):
+            limits[cid] = {'cpus': int(cpus) / 1e9, 'memoryMiB': int(memory) // 1048576}
+    mem = {line.split(':')[0]: int(line.split()[1]) * 1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith(('MemTotal:', 'MemAvailable:'))}
+    disk = shutil.disk_usage('/var/lib/docker')
+    state = {'version': 1, 'containers': containers, 'limits': limits, 'tasks': read_tasks(),
+             'host': {'cpus': info['NCPU'], 'memoryTotal': mem['MemTotal'], 'memoryUsed': mem['MemTotal'] - mem['MemAvailable'],
+                      'load': os.getloadavg()[0], 'cpuTicks': [int(v) for v in Path('/proc/stat').read_text().splitlines()[0].split()[1:9]],
+                      'diskTotal': disk.total, 'diskUsed': disk.used, 'dockerVersion': info['ServerVersion'],
+                      # Limits of running containers: what the guest has promised.
+                      'cpusAllocated': round(sum(limits[cid]['cpus'] for cid in running), 2),
+                      'memoryAllocatedMiB': sum(limits[cid]['memoryMiB'] for cid in running)}}
+    if with_stats:
+        state['stats'] = lines(docker('stats', '--no-stream', '--no-trunc', '--format', '{{json .}}', *running)) if running else []
+        state['images'] = lines(docker('images', '--no-trunc', '--format', '{{json .}}'))
+    return state
 
 
 def handle(request):
     require(isinstance(request, dict) and request.get('version') == 1, 'Unsupported protocol')
     op = request.get('operation')
     if op == 'overview':
-        info = json.loads(docker('info', '--format', '{{json .}}'))
-        containers = lines(docker('ps', '--all', '--no-trunc', '--filter', 'label=' + LABEL, '--format', '{{json .}}'))
-        stats = lines(docker('stats', '--no-stream', '--no-trunc', '--format', '{{json .}}',
-                             *[c['ID'] for c in containers if c['State'] == 'running'])) if any(c['State'] == 'running' for c in containers) else []
-        mem = {line.split(':')[0]: int(line.split()[1]) * 1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith(('MemTotal:', 'MemAvailable:'))}
-        disk = shutil.disk_usage('/var/lib/docker')
-        return {'version': 1, 'containers': containers, 'stats': stats,
-                'images': lines(docker('images', '--no-trunc', '--format', '{{json .}}')),
-                'host': {'cpus': info['NCPU'], 'memoryTotal': mem['MemTotal'], 'memoryUsed': mem['MemTotal'] - mem['MemAvailable'],
-                         'load': os.getloadavg()[0], 'cpuTicks': [int(v) for v in Path('/proc/stat').read_text().splitlines()[0].split()[1:9]],
-                         'diskTotal': disk.total, 'diskUsed': disk.used, 'dockerVersion': info['ServerVersion']}}
+        return host_state(True)
+    if op == 'summary':
+        # Dashboard view: no per-container sampling, so it stays fast.
+        return host_state(False)
     if op == 'create':
         return create(request.get('config'))
     if op in ('start', 'stop', 'restart', 'remove', 'logs'):
@@ -130,7 +220,12 @@ def handle(request):
     if op == 'pull':
         image = request.get('image')
         require(isinstance(image, str) and IMAGE.fullmatch(image), 'Invalid image')
-        docker('pull', '--quiet', image, timeout=240)
+        return start_task('pull', image)
+    if op == 'dismiss':
+        tid = request.get('id')
+        require(isinstance(tid, str) and TASK.fullmatch(tid), 'Invalid task')
+        require(any(task['id'] == tid and task['state'] == 'failed' for task in read_tasks()), 'Only a failed download can be dismissed')
+        (TASKS / (tid + '.json')).unlink(missing_ok=True)
         return {'success': True}
     if op == 'removeImage':
         image = request.get('image')
@@ -141,6 +236,9 @@ def handle(request):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == '--task':
+        run_task(sys.argv[2])
+        return 0
     try:
         data = sys.stdin.buffer.read(65537)
         require(len(data) <= 65536, 'Request too large')

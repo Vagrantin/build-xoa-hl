@@ -1,7 +1,7 @@
 # Dedicated Docker workload template (protocol v1, draft)
 
 This is the guest half of [xcp-hl#7](https://github.com/Vagrantin/xcp-hl/issues/7),
-paired with [xoa-hl#1](https://github.com/Vagrantin/xoa-hl/pull/1).
+paired with the xoa-hl branch [`t3/261113-issue-7-docker-vm`](https://github.com/Vagrantin/xoa-hl/tree/t3/261113-issue-7-docker-vm).
 It is separate from the normal XOA-HL appliance builder.
 
 `docker-host.yml` runs unit/contract tests and a real Docker lifecycle in a
@@ -56,6 +56,15 @@ hard CPU/RAM limits and permits named volumes, environment variables and explici
 ports; port 22 is reserved. Removal never forces running-container deletion or
 removes named volumes. Standard Docker image removal refuses images in use.
 The helper also reports whole-guest resource usage and bounded log snapshots.
+
+Image downloads run in a detached worker so a slow registry never holds the
+management connection: `pull`, and `create` when the image is not local, return
+a task at once. The worker downloads for at most one hour, then creates the
+container when asked to. Task records live under `/run/xoa-hl-docker/tasks`,
+never hold environment values, and vanish at reboot; `overview` lists them and
+`dismiss` clears a failed one. At most four downloads run at once. `overview`
+also reports each container's CPU and memory limits, and `summary` returns the
+same state without per-container sampling, for the XOA-HL Dashboard.
 
 The installed guest is password-locked. XOA-HL supplies a per-guest SSH host key
 and a restricted management key when it deploys the template. For recovery,
