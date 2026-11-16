@@ -8,29 +8,32 @@ It is separate from the normal XOA-HL appliance builder.
 privileged disposable Docker-in-Docker container on GitHub's hosted runner.
 PRs never run a guest build against infrastructure secrets.
 
-For an XVA, use the **Dedicated Docker host template** workflow dispatch with
-`build_image=true`. This requires a disposable self-hosted runner labelled
-`xcp-hl-docker-builder`, with Docker and network access to a QA XCP-ng pool, its
-DHCP guest network and the Packer HTTP port range. Configure:
+For an XVA, push a commit to `t3/261113-issue-7-docker-vm` whose message
+contains `[docker-image]`. `docker-host-image.yml` then builds on a disposable
+self-hosted runner labelled `xcp-hl-docker-builder`, outside Jenkins. The runner
+needs Docker and network access to an XCP-ng host, its DHCP guest network and
+the Packer HTTP port range. Manual dispatch is not used: GitHub only offers it
+for workflows present on `main`.
 
-| Setting | Kind | Purpose |
-|---|---|---|
-| `DOCKER_BUILD_XCPNG_IP` | secret | QA pool master address |
-| `DOCKER_BUILD_XCPNG_USER` | secret | Pool account |
-| `DOCKER_BUILD_XCPNG_PASSWORD` | secret | Pool credential |
-| `DOCKER_BUILD_NETWORK` | variable | DHCP network name |
-| `DOCKER_BUILD_SR` | variable | Writable SR name |
-| `DOCKER_BUILD_ISO_URL` | variable | Pinned AlmaLinux 9 x86_64 minimal ISO |
-| `DOCKER_BUILD_ISO_CHECKSUM` | variable | `sha256:` followed by its 64-digit hash |
+The lab settings never go to GitHub. They live on the runner in
+`/etc/xoa-hl-docker-build/build.env`, readable by the runner account only:
 
-CI generates a masked temporary root password, deletes the generated Packer and
-Kickstart files even on failure, builds Packer in Docker, and uploads the XVA as
-a seven-day artifact. Packer 1.11.2 and the official Vates XenServer plugin
-0.11.4 are pinned in `Packer.Containerfile`. There is no release publishing step
-and no workstation build workflow. New workflows may need to exist on the
-repository's default branch before GitHub allows a manual dispatch; this work
-stays on the integration branch `t3/261113-issue-7-docker-vm`, with no pull
-request, until its source and CI changes have been reviewed.
+| Setting | Purpose |
+|---|---|
+| `XCPNG_IP`, `XCPNG_USER`, `XCPNG_PASSWORD` | XCP-ng host and its XAPI login |
+| `VM_NETWORK_NAME` | DHCP network name |
+| `SR_NAME` | Writable SR name |
+| `ALMALINUX_ISO_URL` | Pinned AlmaLinux 9 x86_64 minimal ISO |
+| `ALMALINUX_ISO_CHECKSUM` | `sha256:` followed by its 64-digit hash |
+
+The job generates a masked temporary root password, deletes the generated Packer
+and Kickstart files even on failure, runs Packer in Docker, keeps the XVA in
+`/var/lib/xoa-hl-docker-build` on the runner and uploads it as a seven-day
+artifact. The AlmaLinux ISO is cached in `/var/cache/xoa-hl-docker-build`.
+Packer 1.11.2 and the official Vates XenServer plugin 0.11.4 are pinned in
+`Packer.Containerfile`. There is no release publishing step and no workstation
+build workflow. The repository is public, so register the runner only for a
+build and remove it afterwards.
 
 The guest is AlmaLinux 9 on ext4, 2 GiB RAM, a 32 GiB disk, stable Docker CE,
 cloud-init and EPEL's Xen guest utilities. The installer refuses XOA and Dom0,

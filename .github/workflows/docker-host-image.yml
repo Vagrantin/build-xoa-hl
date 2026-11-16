@@ -1,0 +1,79 @@
+name: Docker host image (out of band)
+run-name: "Docker host image ${{ github.sha }}"
+
+# Test XVA for xcp-hl#7, outside Jenkins. Runs only for a commit on the
+# integration branch whose message contains [docker-image].
+on:
+  push:
+    branches: ['t3/261113-issue-7-docker-vm']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-host-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: contains(github.event.head_commit.message, '[docker-image]')
+    # Disposable runner on the lab LAN; lab settings stay in a file on it.
+    runs-on: [xcp-hl-docker-builder]
+    timeout-minutes: 120
+    env:
+      SETTINGS: /etc/xoa-hl-docker-build/build.env
+      PACKER_CACHE_DIR: /var/cache/xoa-hl-docker-build
+      KEEP: /var/lib/xoa-hl-docker-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Contract tests
+        run: |
+          python3 tests/test-docker-host.py
+          bash -n scripts/install-docker.sh
+
+      - name: Build Docker guest XVA without publishing a release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -r "$SETTINGS" || { echo "Missing $SETTINGS on the runner"; exit 1; }
+          set -a; . "$SETTINGS"; set +a
+          echo "::add-mask::$XCPNG_PASSWORD"
+          export DOCKER_BUILD_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$DOCKER_BUILD_PASSWORD"
+          python3 docker-host/generate-packer.py
+          docker build -t xoa-docker-packer -f docker-host/Packer.Containerfile .
+          run() {
+            docker run --rm --network host -e PACKER_CACHE_DIR=/cache \
+              -v "$PACKER_CACHE_DIR:/cache" -v "$PWD:/work" -w /work xoa-docker-packer "$@"
+          }
+          run validate docker-host/packer.json
+          run build docker-host/packer.json
+
+      - name: Remove generated credentials
+        if: always()
+        run: sudo rm -f docker-host/packer.json docker-host/http/inst.ks
+
+      - name: Keep the XVA on the runner for import
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" docker-host/output
+          xva=$(find docker-host/output -name '*.xva' | head -1)
+          test -n "$xva"
+          ls -lh "$xva"
+          ( cd "$(dirname "$xva")" && sha256sum "$(basename "$xva")" | tee SHA256SUMS )
+          cp "$xva" "$KEEP/docker-host-v1-${GITHUB_SHA::7}.xva"
+          {
+            echo '### Docker host XVA (test build, not a release)'
+            echo '```'
+            cat "$(dirname "$xva")/SHA256SUMS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-host-v1-xva
+          path: docker-host/output/**
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
