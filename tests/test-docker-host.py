@@ -42,6 +42,11 @@ class Protocol(unittest.TestCase):
         with patch.object(m,'docker',side_effect=['[{"Config":{"Labels":{"net.xcp-hl.managed":"1"}}}]','']) as docker:
             self.call('remove',id='a'*64)
         self.assertEqual(docker.call_args.args,('rm','a'*64))
+    def test_running_container_is_not_removed(self):
+        state='[{"Config":{"Labels":{"net.xcp-hl.managed":"1"}},"State":{"Running":true}}]'
+        with patch.object(m,'docker',return_value=state) as docker, self.assertRaisesRegex(ValueError,'Stop the container'):
+            self.call('remove',id='a'*64)
+        self.assertEqual(docker.call_count,1)
     def test_error_and_protocol_validation(self):
         for request in [dict(version=2,operation='overview'), dict(version=1,operation='exec')]:
             with self.assertRaises(ValueError): m.handle(request)

@@ -202,7 +202,7 @@ def handle(request):
         return create(request.get('config'))
     if op in ('start', 'stop', 'restart', 'remove', 'logs'):
         cid = request.get('id')
-        managed(cid)
+        container = managed(cid)
         if op == 'logs':
             # Non-following, bounded log snapshot, including stderr. Docker mux is handled by CLI.
             with tempfile.TemporaryFile() as output:
@@ -213,7 +213,9 @@ def handle(request):
                 output.seek(max(0, size - 65536))
                 return {'logs': output.read(65536).decode('utf-8', errors='replace')}
         if op == 'remove':
-            docker('rm', cid)  # Running containers must be stopped first. Never -v.
+            # Never forced and never -v: a running container is refused with a clear reason.
+            require(not container.get('State', {}).get('Running'), 'Stop the container before removing it')
+            docker('rm', cid)
         else:
             docker(op, cid)
         return {'success': True}
