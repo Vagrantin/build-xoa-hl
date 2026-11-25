@@ -62,6 +62,8 @@ fi
 XOA_EMAIL="$XOA_EMAIL" XOA_PASSWORD="$XOA_PASSWORD" \
     NODE_TLS_REJECT_UNAUTHORIZED=0 node /root/xoa-apply-credentials.mjs
 
+# The account can predate the "always" setting: this write syncs the whole AOF (xcp-hl#389).
+redis_ok SET xoa-hl:provisioned 1
 redis_ok SAVE
 redis_ok CONFIG SET appendfsync everysec
 # Credentials (including /etc/shadow) must reach disk before the done flag.
